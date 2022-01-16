@@ -4,7 +4,7 @@ This document is for people who want to contribute to this project!
 # Code Style
 
 ## Formatting
-We are using **[Prettier](https://prettier.io)** to format the code.
+Use **[Prettier](https://prettier.io)** to format the code.
 
 ## File names
 - Always use `PascalCase` for the files containing classes (example: `Queue`, `Track`, `Player` etc.)
@@ -12,11 +12,11 @@ We are using **[Prettier](https://prettier.io)** to format the code.
 ## Some Rules
 - Use `camelCase` for `Function names`, `Variables`, etc. and `PascalCase` for `Class name`
 - Do not make unused variables/imports
-- Don't forget to write `JSDOC` for each property and method
+- Don't forget to properly document the code
 - Use English language
 
 # Pull Requests
 - Use English language
 - Explain what your update does
-- Run `npm run docs:test` command to make sure documentation is working
+- Run `npm run build:check` command to make sure everything is working
 - Format the code properly with `npm run format`
