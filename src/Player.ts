@@ -1,6 +1,5 @@
 import { QueueType } from "@discord-player/core";
 import { Client, Collection, GuildResolvable, Snowflake } from "discord.js";
-import { Extractor } from "./plugins/Extractor";
 import { Queue, QueueOptions } from "./Structures/Queue";
 import { PlayerEventEmitter } from "./utils/EventEmitter";
 
@@ -12,9 +11,6 @@ export interface PlayerEvents {
     queueCreate: (queue: Queue) => unknown;
     queueClear: (queues: Queue[]) => unknown;
     queueDelete: (queue: Queue) => unknown;
-    extractorCreate: (extractor: Extractor) => unknown;
-    extractorClear: (extractors: Extractor[]) => unknown;
-    extractorDelete: (extractor: Extractor) => unknown;
 }
 
 export interface PlayerOptions {
@@ -24,7 +20,6 @@ export interface PlayerOptions {
 
 export class Player extends PlayerEventEmitter<PlayerEvents> {
     public queues = new Collection<Snowflake, Queue>();
-    public extractors = new Collection<string, Extractor>();
 
     public constructor(public readonly client: Client<true>, public readonly options?: PlayerOptions) {
         super(["error", "connectionError"]);
@@ -35,38 +30,6 @@ export class Player extends PlayerEventEmitter<PlayerEvents> {
                 process.emitWarning(`[DiscordPlayerWarning] Event ${eventName} does not have event listener. Events ${events.join(", ")} must have event listener.`);
             });
     }
-
-    // #region extractors
-    public registerExtractor(id: string, extractorConstructor: typeof Extractor) {
-        if (this.extractors.has(id)) return this.extractors.get(id);
-        const ext = new extractorConstructor(id, {
-            player: this
-        });
-
-        this.extractors.set(id, ext);
-
-        this.emit("extractorCreate", ext);
-
-        return ext;
-    }
-
-    public getExtractor(id: string) {
-        return this.extractors.get(id) ?? null;
-    }
-
-    public clearExtractors() {
-        this.emit("extractorClear", [...this.extractors.values()]);
-        return this.extractors.clear();
-    }
-
-    public unregisterExtractor(id: string) {
-        const existing = this.extractors.get(id);
-        if (existing) existing.willUnmount();
-        const success = this.extractors.delete(id);
-        if (success) this.emit("extractorDelete", existing);
-        return success;
-    }
-    // #endregion extractors
 
     // #region queue
     public clearQueue() {
@@ -111,8 +74,7 @@ export class Player extends PlayerEventEmitter<PlayerEvents> {
 
     public toJSON() {
         return {
-            queues: this.queues.toJSON(),
-            extractors: this.extractors.toJSON()
+            queues: this.queues.toJSON()
         };
     }
 
