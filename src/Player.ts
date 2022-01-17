@@ -1,5 +1,6 @@
 import { QueueType } from "@discord-player/core";
 import { Client, Collection, GuildResolvable, Snowflake } from "discord.js";
+import { VoiceGatewayProvider } from "./core/VoiceGatewayProvider";
 import { Queue, QueueOptions } from "./Structures/Queue";
 import { PlayerEventEmitter } from "./utils/EventEmitter";
 
@@ -16,13 +17,16 @@ export interface PlayerEvents {
 export interface PlayerOptions {
     disableEventsWarning?: boolean;
     defaultQueueMethod?: QueueType;
+    gateway: VoiceGatewayProvider;
 }
 
 export class Player extends PlayerEventEmitter<PlayerEvents> {
     public queues = new Collection<Snowflake, Queue>();
 
-    public constructor(public readonly client: Client<true>, public readonly options?: PlayerOptions) {
+    public constructor(public readonly client: Client<true>, public readonly options: PlayerOptions) {
         super(["error", "connectionError"]);
+
+        if (!this.options.gateway || !(this.options.gateway instanceof VoiceGatewayProvider)) throw new TypeError("invalid voice gateway provider");
 
         // eslint-disable-next-line no-extra-boolean-cast
         if (!!this.options?.disableEventsWarning)
