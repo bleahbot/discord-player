@@ -1,5 +1,5 @@
 import { Player } from "../Player";
-import { randomUUID } from "crypto";
+import { randomUUID } from "node:crypto";
 import { Nullable } from "../utils/types";
 
 export interface TrackOptions {

@@ -35,6 +35,10 @@ export class Player extends PlayerEventEmitter<PlayerEvents> {
             });
     }
 
+    public getVoiceManager() {
+        return this.options.gateway;
+    }
+
     // #region queue
     public clearQueue() {
         this.emit("queueClear", [...this.queues.values()]);
@@ -73,7 +77,6 @@ export class Player extends PlayerEventEmitter<PlayerEvents> {
             yield queue;
         }
     }
-
     // #endregion queue
 
     public toJSON() {
