@@ -1,4 +1,5 @@
-import ytdl, { downloadOptions } from '@distube/ytdl-core';
+import { YtdlCore } from "@ybd-project/ytdl-core";
+import { YTDL_DownloadOptions } from "@ybd-project/ytdl-core/package/types/options";
 import { opus as Opus, FFmpeg } from 'prism-media';
 import { Readable, Duplex } from 'stream';
 
@@ -15,7 +16,7 @@ const evn = [
     'reconnect',
 ];
 
-interface YTDLStreamOptions extends downloadOptions {
+interface YTDLStreamOptions extends YTDL_DownloadOptions {
     seek?: number;
     encoderArgs?: string[];
     fmt?: string;
@@ -66,7 +67,7 @@ const StreamDownloader = (url: string, options?: YTDLStreamOptions) => {
         args: FFmpegArgs,
     });
 
-    const inputStream = ytdl(url, options);
+    const inputStream = YtdlCore.download(url, options);
     const output = inputStream.pipe(transcoder);
     if (options && !options.opusEncoded) {
         for (const event of evn) {
@@ -193,6 +194,6 @@ const arbitraryStream = (
 StreamDownloader.arbitraryStream = arbitraryStream;
 StreamDownloader.version = require('../../package.json').version;
 
-const DiscordYTDLCore = Object.assign(StreamDownloader, ytdl);
+const DiscordYTDLCore = Object.assign(StreamDownloader, YtdlCore);
 
 export = DiscordYTDLCore;

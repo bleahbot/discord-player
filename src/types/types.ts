@@ -4,7 +4,7 @@ import { Queue } from "../Structures/Queue";
 import Track from "../Structures/Track";
 import { Playlist } from "../Structures/Playlist";
 import { StreamDispatcher } from "../VoiceInterface/StreamDispatcher";
-import { downloadOptions, createAgent } from "@distube/ytdl-core";
+import { YTDL_DownloadOptions } from "@ybd-project/ytdl-core/package/types/options";
 
 export type FiltersName = keyof QueueFilters;
 
@@ -57,10 +57,11 @@ export interface QueueFilters {
  * - soundcloud
  * - youtube
  * - spotify
+ * - attachment
  * - arbitrary
  * @typedef {string} TrackSource
  */
-export type TrackSource = "soundcloud" | "youtube" | "spotify" | "arbitrary";
+export type TrackSource = "soundcloud" | "youtube" | "spotify" | "attachment" | "arbitrary";
 
 /**
  * @typedef {object} RawTrackData
@@ -144,15 +145,20 @@ export interface PlayerOptions {
     leaveOnEnd?: boolean;
     leaveOnEndCooldown?: number;
     leaveOnStop?: boolean;
-    leaveOnEmpty?: boolean;
+    leaveOnEmpty?: boolean; 
     leaveOnEmptyCooldown?: number;
     autoSelfDeaf?: boolean;
-    ytdlOptions?: downloadOptions;
+    ytdlOptions?: YTDL_DownloadOptions;
     ytdlAgent?: {
-        type: "proxy" | "cookie";
-        proxy: string;
-        cookies: typeof createAgent[];
-    }
+        proxyUri?: string;
+        poToken?: string;
+        visitorData?: string;
+        oauth2?: {
+            accessToken: string;
+            refreshToken: string;
+            expiryDate: string;
+        };
+    };
     initialVolume?: number;
     bufferingTimeout?: number;
     spotifyBridge?: boolean;
@@ -232,10 +238,8 @@ export interface ExtractorModelData {
  * - SPOTIFY_SONG
  * - SPOTIFY_ALBUM
  * - SPOTIFY_PLAYLIST
- * - FACEBOOK
- * - VIMEO
+ * - ATTACHMENT
  * - ARBITRARY
- * - REVERBNATION
  * - YOUTUBE_SEARCH
  * - YOUTUBE_VIDEO
  * - SOUNDCLOUD_SEARCH
@@ -251,10 +255,8 @@ export enum QueryType {
     SPOTIFY_SONG,
     SPOTIFY_ALBUM,
     SPOTIFY_PLAYLIST,
-    FACEBOOK,
-    VIMEO,
+    ATTACHMENT,
     ARBITRARY,
-    REVERBNATION,
     YOUTUBE_SEARCH,
     YOUTUBE_VIDEO,
     SOUNDCLOUD_SEARCH
@@ -482,18 +484,23 @@ export interface PlaylistJSON {
 
 /**
  * @typedef {object} PlayerInitOptions
- * @property {boolean} [autoRegisterExtractor=true] If it should automatically register `@discord-player/extractor`
- * @property {YTDLDownloadOptions} [ytdlOptions={}] The options passed to `@distube/ytdl-core`
+ * @property {boolean} [autoRegisterExtractor=true] If it should automatically register extractors
+ * @property {YTDLDownloadOptions} [ytdlOptions={}] The options passed to `@ybd-project/ytdl-core`
  * @property {YTDLAgent} [ytdlAgent={}] The youtube agent
  * @property {number} [connectionTimeout=20000] The voice connection timeout
  */
 export interface PlayerInitOptions {
     autoRegisterExtractor?: boolean;
-    ytdlOptions?: downloadOptions;
+    ytdlOptions?: YTDL_DownloadOptions;
     ytdlAgent?: {
-        type: "proxy" | "cookie";
-        proxy: string;
-        cookies: typeof createAgent[];
-    }
+        proxyUri?: string;
+        poToken?: string;
+        visitorData?: string;
+        oauth2?: {
+            accessToken: string;
+            refreshToken: string;
+            expiryDate: string;
+        };
+    };
     connectionTimeout?: number;
 }
