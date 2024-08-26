@@ -5,15 +5,19 @@ import { VoiceUtils } from "./VoiceInterface/VoiceUtils";
 import { PlayerEvents, PlayerOptions, QueryType, SearchOptions, PlayerInitOptions, PlayerSearchResult } from "./types/types";
 import Track from "./Structures/Track";
 import { QueryResolver } from "./utils/QueryResolver";
+import { getInfoAttachment } from "./internal/Attachment";
 import YouTube from "youtube-sr";
 import { Util } from "./utils/Util";
-import Spotify from "spotify-url-info";
+import fetch from 'isomorphic-unfetch';
+import spotifyUrlInfo from 'spotify-url-info';
 import { PlayerError, ErrorStatusCode } from "./Structures/PlayerError";
-import { getInfo as ytdlGetInfo } from "@distube/ytdl-core";
+import { YtdlCore } from "@ybd-project/ytdl-core";
 import { Client as SoundCloud, SearchResult as SoundCloudSearchResult } from "soundcloud-scraper";
 import { Playlist } from "./Structures/Playlist";
 import { ExtractorModel } from "./Structures/ExtractorModel";
 import { generateDependencyReport } from "@discordjs/voice";
+
+const Spotify = spotifyUrlInfo(fetch);
 
 const soundcloud = new SoundCloud();
 
@@ -59,10 +63,6 @@ class Player extends EventEmitter<PlayerEvents> {
 
         if (this.options?.autoRegisterExtractor) {
             let nv: any; // eslint-disable-line @typescript-eslint/no-explicit-any
-
-            if ((nv = Util.require("@discord-player/extractor"))) {
-                ["Attachment", "Facebook", "Reverbnation", "Vimeo"].forEach((ext) => void this.use(ext, nv[ext]));
-            }
         }
     }
 
@@ -270,18 +270,45 @@ class Player extends EventEmitter<PlayerEvents> {
         const qt = options.searchEngine === QueryType.AUTO ? QueryResolver.resolve(query) : options.searchEngine;
         switch (qt) {
             case QueryType.YOUTUBE_VIDEO: {
-                const info = await ytdlGetInfo(query, this.options.ytdlOptions).catch(Util.noop);
+                let agent;
+                let poToken;
+                let visitorData;
+                let oauth2;
+                if (this.options.ytdlAgent) {
+                    if (this.options.ytdlAgent.proxyUri) {
+                        agent = await YtdlCore.createProxyAgent({ uri: this.options.ytdlAgent.proxyUri });
+                    }
+                    if (this.options.ytdlAgent.poToken && this.options.ytdlAgent.visitorData) {
+                        poToken = this.options.ytdlAgent.poToken;
+                        visitorData = this.options.ytdlAgent.visitorData;
+                    }
+                    if (this.options.ytdlAgent.oauth2 && this.options.ytdlAgent.oauth2.accessToken && this.options.ytdlAgent.oauth2.refreshToken && this.options.ytdlAgent.oauth2.expiryDate) {
+                        oauth2 = new YtdlCore.OAuth2({
+                            accessToken: this.options.ytdlAgent.oauth2.accessToken,
+                            refreshToken: this.options.ytdlAgent.oauth2.refreshToken,
+                            expiryDate: this.options.ytdlAgent.oauth2.expiryDate,
+                        });
+                    }
+                }
+                const info = await YtdlCore.getFullInfo(query, {
+                    ...this.options.ytdlOptions,
+                    agent: agent || null,
+                    oauth2: oauth2 || null,
+                    poToken: poToken || null,
+                    visitorData: visitorData || null
+                }).catch(Util.noop);
+
                 if (!info) return { playlist: null, tracks: [] };
 
                 const track = new Track(this, {
                     title: info.videoDetails.title,
                     description: info.videoDetails.description,
                     author: info.videoDetails.author?.name,
-                    url: info.videoDetails.video_url,
+                    url: info.videoDetails.videoUrl,
                     requestedBy: options.requestedBy as User,
                     thumbnail: Util.last(info.videoDetails.thumbnails)?.url,
-                    views: parseInt(info.videoDetails.viewCount.replace(/[^0-9]/g, "")) || 0,
-                    duration: Util.buildTimeCode(Util.parseMS(parseInt(info.videoDetails.lengthSeconds) * 1000)),
+                    views: parseInt(String(info.videoDetails.viewCount).replace(/[^0-9]/g, "")) || 0,
+                    duration: Util.buildTimeCode(Util.parseMS(info.videoDetails.lengthSeconds * 1000)),
                     source: "youtube",
                     raw: info
                 });
@@ -345,14 +372,11 @@ class Player extends EventEmitter<PlayerEvents> {
                 if (!spotifyData) return { playlist: null, tracks: [] };
                 const spotifyTrack = new Track(this, {
                     title: spotifyData.name,
-                    description: spotifyData.description ?? "",
-                    author: spotifyData.artists[0]?.name ?? "Unknown Artist",
-                    url: spotifyData.external_urls?.spotify ?? query,
-                    thumbnail:
-                        spotifyData.album?.images[0]?.url ?? spotifyData.preview_url?.length
-                            ? `https://i.scdn.co/image/${spotifyData.preview_url?.split("?cid=")[1]}`
-                            : "https://www.scdn.co/i/_global/twitter_card-default.jpg",
-                    duration: Util.buildTimeCode(Util.parseMS(spotifyData.duration_ms)),
+                    description: spotifyData.subtitle ? `${spotifyData.title} - ${spotifyData.subtitle}` : "",
+                    author: spotifyData.subtitle ?? "Unknown Artist",
+                    url: spotifyData.id ? `https://open.spotify.com/track/${spotifyData.id}` : query,
+                    thumbnail: spotifyData.coverArt?.sources?.[0]?.url || "https://www.scdn.co/i/_global/twitter_card-default.jpg",
+                    duration: Util.buildTimeCode(Util.parseMS(spotifyData.duration ?? spotifyData.duration ?? 0)),
                     views: 0,
                     requestedBy: options.requestedBy,
                     source: "spotify"
@@ -366,37 +390,37 @@ class Player extends EventEmitter<PlayerEvents> {
                 if (!spotifyPlaylist) return { playlist: null, tracks: [] };
 
                 const playlist = new Playlist(this, {
-                    title: spotifyPlaylist.name ?? spotifyPlaylist.title,
-                    description: spotifyPlaylist.description ?? "",
-                    thumbnail: spotifyPlaylist.images[0]?.url ?? "https://www.scdn.co/i/_global/twitter_card-default.jpg",
+                    title: spotifyPlaylist.title,
+                    description: spotifyPlaylist.subtitle ? `${spotifyPlaylist.title} - ${spotifyPlaylist.subtitle}` : "",
+                    thumbnail: spotifyPlaylist.coverArt?.sources?.[0]?.url || "https://www.scdn.co/i/_global/twitter_card-default.jpg",
                     type: spotifyPlaylist.type,
                     source: "spotify",
                     author:
                         spotifyPlaylist.type !== "playlist"
                             ? {
-                                  name: spotifyPlaylist.artists[0]?.name ?? "Unknown Artist",
-                                  url: spotifyPlaylist.artists[0]?.external_urls?.spotify ?? null
+                                  name: spotifyPlaylist.subtitle ?? "Unknown Artist",
+                                  url: null as unknown as string
                               }
                             : {
-                                  name: spotifyPlaylist.owner?.display_name ?? spotifyPlaylist.owner?.id ?? "Unknown Artist",
-                                  url: spotifyPlaylist.owner?.external_urls?.spotify ?? null
+                                  name: spotifyPlaylist.subtitle ?? "Unknown Artist",
+                                  url: null as unknown as string
                               },
                     tracks: [],
                     id: spotifyPlaylist.id,
-                    url: spotifyPlaylist.external_urls?.spotify ?? query,
+                    url: spotifyPlaylist.id ? `https://open.spotify.com/track/${spotifyPlaylist.id}` : query,
                     rawPlaylist: spotifyPlaylist
                 });
 
                 if (spotifyPlaylist.type !== "playlist") {
                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    playlist.tracks = spotifyPlaylist.tracks.items.map((m: any) => {
+                    playlist.tracks = spotifyPlaylist.trackList.map((m: any) => {
                         const data = new Track(this, {
-                            title: m.name ?? "",
-                            description: m.description ?? "",
-                            author: m.artists[0]?.name ?? "Unknown Artist",
-                            url: m.external_urls?.spotify ?? query,
-                            thumbnail: spotifyPlaylist.images[0]?.url ?? "https://www.scdn.co/i/_global/twitter_card-default.jpg",
-                            duration: Util.buildTimeCode(Util.parseMS(m.duration_ms)),
+                            title: m.title ?? "",
+                            description: m.subtitle ? `${m.title} - ${m.subtitle}` : "",
+                            author: m.subtitle ?? "Unknown Artist",
+                            url: m.uid ? `https://open.spotify.com/track/${m.uid}` : query,
+                            thumbnail: spotifyPlaylist.coverArt?.sources?.[0]?.url || "https://www.scdn.co/i/_global/twitter_card-default.jpg",
+                            duration: Util.buildTimeCode(Util.parseMS(m.duration ?? 0)),
                             views: 0,
                             requestedBy: options.requestedBy as User,
                             playlist,
@@ -407,14 +431,14 @@ class Player extends EventEmitter<PlayerEvents> {
                     }) as Track[];
                 } else {
                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    playlist.tracks = spotifyPlaylist.tracks.items.map((m: any) => {
+                    playlist.tracks = spotifyPlaylist.trackList.map((m: any) => {
                         const data = new Track(this, {
-                            title: m.track.name ?? "",
-                            description: m.track.description ?? "",
-                            author: m.track.artists[0]?.name ?? "Unknown Artist",
-                            url: m.track.external_urls?.spotify ?? query,
-                            thumbnail: m.track.album?.images[0]?.url ?? "https://www.scdn.co/i/_global/twitter_card-default.jpg",
-                            duration: Util.buildTimeCode(Util.parseMS(m.track.duration_ms)),
+                            title: m.title ?? "",
+                            description: m.subtitle ? `${m.title} - ${m.subtitle}` : "",
+                            author: m.subtitle ?? "Unknown Artist",
+                            url: m.uid ? `https://open.spotify.com/track/${m.uid}` : query,
+                            thumbnail: spotifyPlaylist.coverArt?.sources?.[0]?.url || "https://www.scdn.co/i/_global/twitter_card-default.jpg",
+                            duration: Util.buildTimeCode(Util.parseMS(m.duration ?? 0)),
                             views: 0,
                             requestedBy: options.requestedBy as User,
                             playlist,
@@ -506,6 +530,24 @@ class Player extends EventEmitter<PlayerEvents> {
                 );
 
                 return { playlist: playlist, tracks: playlist.tracks };
+            }
+            case QueryType.ATTACHMENT: {
+                const attachmentInfo = await getInfoAttachment(query);
+                if (!attachmentInfo) return { playlist: null, tracks: [] };
+
+                const attachmentTrack = new Track(this, {
+                    title: attachmentInfo.info[0].title,
+                    description: attachmentInfo.info[0].description,
+                    author: attachmentInfo.info[0].author,
+                    url: attachmentInfo.info[0].url,
+                    thumbnail: attachmentInfo.info[0].thumbnail,
+                    duration: Util.buildTimeCode(Util.parseMS(attachmentInfo.info[0].duration)),
+                    views: attachmentInfo.info[0].views,
+                    requestedBy: options.requestedBy,
+                    source: "attachment"
+                });
+
+                return { playlist: null, tracks: [attachmentTrack] };
             }
             default:
                 return { playlist: null, tracks: [] };

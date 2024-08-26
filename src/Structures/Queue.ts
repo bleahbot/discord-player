@@ -4,6 +4,7 @@ import { StreamDispatcher } from "../VoiceInterface/StreamDispatcher";
 import Track from "./Track";
 import { PlayerOptions, PlayerProgressbarOptions, PlayOptions, QueueFilters, QueueRepeatMode, TrackSource } from "../types/types";
 import ytdl from "../utils/DiscordYTDL";
+import { YtdlCore } from "@ybd-project/ytdl-core";
 import { AudioResource, StreamType } from "@discordjs/voice";
 import { Util } from "../utils/Util";
 import YouTube from "youtube-sr";
@@ -679,22 +680,32 @@ class Queue<T = unknown> {
                         });
             } else {
                 let agent;
-                if (this.options.ytdlAgent && this.options.ytdlAgent.type && this.options.ytdlAgent.type === "proxy") {
-                    if (this.options.ytdlAgent.proxy && this.options.ytdlAgent.cookies) {
-                        agent = await ytdl.createProxyAgent({ uri: this.options.ytdlAgent.proxy }, this.options.ytdlAgent.cookies);
-                    } else if (this.options.ytdlAgent.proxy) {
-                        agent = await ytdl.createProxyAgent({ uri: this.options.ytdlAgent.proxy });
+                let poToken;
+                let visitorData;
+                let oauth2;
+                if (this.options.ytdlAgent) {
+                    if (this.options.ytdlAgent.proxyUri) {
+                        agent = await YtdlCore.createProxyAgent({ uri: this.options.ytdlAgent.proxyUri });
                     }
-                }
-                if (this.options.ytdlAgent && this.options.ytdlAgent.type && this.options.ytdlAgent.type === "cookie") {
-                    if (this.options.ytdlAgent.cookies) {
-                        agent = await ytdl.createAgent(this.options.ytdlAgent.cookies);
+                    if (this.options.ytdlAgent.poToken && this.options.ytdlAgent.visitorData) {
+                        poToken = this.options.ytdlAgent.poToken;
+                        visitorData = this.options.ytdlAgent.visitorData;
+                    }
+                    if (this.options.ytdlAgent.oauth2 && this.options.ytdlAgent.oauth2.accessToken && this.options.ytdlAgent.oauth2.refreshToken && this.options.ytdlAgent.oauth2.expiryDate) {
+                        oauth2 = new YtdlCore.OAuth2({
+                            accessToken: this.options.ytdlAgent.oauth2.accessToken,
+                            refreshToken: this.options.ytdlAgent.oauth2.refreshToken,
+                            expiryDate: this.options.ytdlAgent.oauth2.expiryDate,
+                        });
                     }
                 }
                 stream = ytdl(link, {
-                    agent: agent || null,
                     ...this.options.ytdlOptions,
-                    // discord-@distube/ytdl-core
+                    agent: agent || null,
+                    oauth2: oauth2 || null,
+                    poToken: poToken || null,
+                    visitorData: visitorData || null,
+                    // discord-@ybd-project/ytdl-core
                     opusEncoded: false,
                     fmt: "s16le",
                     encoderArgs: options.encoderArgs ?? this._activeFilters.length ? ["-af", AudioFilters.create(this._activeFilters)] : [],
@@ -709,6 +720,8 @@ class Queue<T = unknown> {
                 ? tryArb
                 : track.raw.source === "soundcloud"
                 ? await track.raw.engine.downloadProgressive()
+                : track.raw.source === "attachment"
+                ? await track.url
                 : typeof track.raw.engine === "function"
                 ? await track.raw.engine()
                 : track.raw.engine;

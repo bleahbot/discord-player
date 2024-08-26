@@ -5,6 +5,8 @@ Complete framework to facilitate music commands using **[discord.js](https://dis
 
 ## Installation
 
+> ⚠️ Discord Player requires Discord.js 13.x. Please ensure that you have a compatible version by running npm list discord.js in your terminal.
+
 ### Install **[@bleah/discord-player](https://npmjs.com/package/@bleah/discord-player)**
 
 ```sh
@@ -131,20 +133,11 @@ client.login(process.env.DISCORD_TOKEN);
 
 ## Supported websites
 
-By default, @bleah/discord-player supports **YouTube**, **Spotify** and **SoundCloud** streams only.
+By default, @bleah/discord-player supports **YouTube**, **Spotify**, **SoundCloud** and **Attachment Links** streams only.
 
 ### Optional dependencies
 
-Discord Player provides an **Extractor API** that enables you to use your custom stream extractor with it. Some packages have been made by the community to add new features using this API.
-
-#### [@discord-player/extractor](https://github.com/Snowflake107/discord-player-extractors) (optional)
-
-Optional package that adds support for `vimeo`, `reverbnation`, `facebook`, `attachment links` and `lyrics`.
-You just need to install it using `npm i --save @discord-player/extractor` (discord-player will automatically detect and use it).
-
-#### [@discord-player/downloader](https://github.com/DevSnowflake/discord-player-downloader) (optional)
-
-`@discord-player/downloader` is an optional package that brings support for +700 websites. The documentation is available [here](https://github.com/DevSnowflake/discord-player-downloader).
+Discord Player provides an **Extractor API** that enables you to use your custom stream extractor with it.
 
 ## Examples of bots made with Discord Player
 
@@ -168,64 +161,81 @@ import "@bleah/discord-player/smoothVolume"
 
 > ⚠️ Make sure that line is situated at the **TOP** of your **main** file.
 
-### Use cookies
+### Use PoToken
+
+The **poToken** can be used to avoid bot errors and must be specified with visitorData. If you need to obtain poToken or visitorData, please use one of the following repositories to generate them.
+
+1. https://github.com/YunzheZJU/youtube-po-token-generator (recommended)
+2. https://github.com/iv-org/youtube-trusted-session-generator
+3. https://github.com/fsholehan/scrape-youtube
+
+#### Example
 
 ```js
 const player = new Player(client, {
     ytdlAgent: {
-        type: 'cookie',
-        cookies: [
-          {
-            domain: ".youtube.com",
-            expirationDate: 1234567890,
-            hostOnly: false,
-            httpOnly: true,
-            name: "LOGIN_INFO",
-            path: "/",
-            sameSite: "no_restriction",
-            secure: true,
-            session: false,
-            value: "---xxx---",
-          },
-          "...",
-        ]
+        poToken: "",
+        visitorData: ""
     }
 });
 ```
+
+### Use OAuth2
+
+These can be used to avoid age restrictions and bot errors. See below for instructions on how to use them. If you need to obtain OAuth2 tokens, please use one of the following repositories to generate them.
+
+1. https://github.com/imputnet/cobalt
+
+#### Cobalt Token generation
+
+```bash
+git clone https://github.com/imputnet/cobalt
+cd cobalt/api/src
+npm install -g pnpm
+pnpm install
+npm run token:youtube
+```
+
+#### Example
+
+```js
+const player = new Player(client, {
+    ytdlAgent: {
+        oauth2: {
+            accessToken: "",
+            refreshToken: "",
+            expiryDate: "yyyy-MM-ddThh-mm-ssZ"
+        }
+    }
+});
+```
+
+> ⚠️ Be sure to generate tokens with accounts that can be banned, as accounts may be banned.
+> The specified OAuth2 token is automatically updated, so you do not need to update it yourself.
 
 ### Use custom proxy
 
 ```js
 const player = new Player(client, {
     ytdlAgent: {
-        type: 'proxy',
-        proxy: { uri: 'my.proxy.server' }
+        proxyUri: "my.proxy.server"
     }
 });
 ```
 
-### Use custom proxy with cookies
+### Use custom proxy with PoToken and OAuth2
 
 ```js
 const player = new Player(client, {
     ytdlAgent: {
-        type: 'proxy',
-        proxy: { uri: 'my.proxy.server' },
-        cookies: [
-          {
-            domain: ".youtube.com",
-            expirationDate: 1234567890,
-            hostOnly: false,
-            httpOnly: true,
-            name: "LOGIN_INFO",
-            path: "/",
-            sameSite: "no_restriction",
-            secure: true,
-            session: false,
-            value: "---xxx---",
-          },
-          "...",
-        ]
+        proxyUri: "my.proxy.server",
+        poToken: "",
+        visitorData: "",
+        oauth2: {
+            accessToken: "",
+            refreshToken: "",
+            expiryDate: "yyyy-MM-ddThh-mm-ssZ"
+        }
     }
 });
 ```
@@ -233,20 +243,11 @@ const player = new Player(client, {
 > You may also create a simple proxy server and forward requests through it.
 > See **[https://github.com/http-party/node-http-proxy](https://github.com/http-party/node-http-proxy)** for more info.
 
-#### How to get cookies
-
-- Install [Get cookies.txt LOCALLY](https://github.com/kairi003/Get-cookies.txt-LOCALLY) extension for your browser.
-- Go to [YouTube](https://www.youtube.com/).
-- Log in to your account. (You should use a new account for this purpose)
-- Change the export format to JSON.
-- Click on the extension icon and click "Copy" button.
-- Your cookie will be added to your clipboard and paste it into your code.
-
 ### Custom stream Engine
 
-Discord Player by default uses **[@distube/ytdl-core](https://github.com/distubejs/ytdl-core)** for youtube and some other extractors for other sources.
+Discord Player by default uses **[@ybd-project/ytdl-core](https://github.com/ybd-project/ytdl-core)** for youtube and some other extractors for other sources.
 If you need to modify this behavior without touching extractors, you need to use `createStream` functionality of discord player.
-Here's an example on how you can use **[play-dl](https://npmjs.com/package/play-dl)** to download youtube streams instead of using @distube/ytdl-core.
+Here's an example on how you can use **[play-dl](https://npmjs.com/package/play-dl)** to download youtube streams instead of using @ybd-project/ytdl-core.
 
 ```js
 const playdl = require("play-dl");
