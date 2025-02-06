@@ -1,4 +1,4 @@
-import { YtdlCore } from "@ybd-project/ytdl-core";
+import { validateID, validateURL } from "@distube/ytdl-core";
 import { YouTube } from "youtube-sr";
 import { QueryType } from "../types/types";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -28,7 +28,7 @@ class QueryResolver {
         if (SoundcloudValidateURL(query, "track")) return QueryType.SOUNDCLOUD_TRACK;
         if (SoundcloudValidateURL(query, "playlist") || query.includes("/sets/")) return QueryType.SOUNDCLOUD_PLAYLIST;
         if (YouTube.isPlaylist(query)) return QueryType.YOUTUBE_PLAYLIST;
-        if (YtdlCore.validateID(query) || YtdlCore.validateURL(query)) return QueryType.YOUTUBE_VIDEO;
+        if (validateID(query) || validateURL(query)) return QueryType.YOUTUBE_VIDEO;
         if (spotifySongRegex.test(query)) return QueryType.SPOTIFY_SONG;
         if (spotifyPlaylistRegex.test(query)) return QueryType.SPOTIFY_PLAYLIST;
         if (spotifyAlbumRegex.test(query)) return QueryType.SPOTIFY_ALBUM;

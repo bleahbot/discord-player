@@ -9,13 +9,15 @@ import { getInfoAttachment } from "./internal/Attachment";
 import YouTube from "youtube-sr";
 import { Util } from "./utils/Util";
 import fetch from 'isomorphic-unfetch';
-import spotifyUrlInfo from 'spotify-url-info';
 import { PlayerError, ErrorStatusCode } from "./Structures/PlayerError";
-import { YtdlCore } from "@ybd-project/ytdl-core";
+import ytdl from "./utils/DiscordYTDL";
+import { getInfo as ytdlGetInfo } from "@distube/ytdl-core";
 import { Client as SoundCloud, SearchResult as SoundCloudSearchResult } from "soundcloud-scraper";
 import { Playlist } from "./Structures/Playlist";
 import { ExtractorModel } from "./Structures/ExtractorModel";
 import { generateDependencyReport } from "@discordjs/voice";
+// @ts-ignore
+import spotifyUrlInfo from 'spotify-url-info';
 
 const Spotify = spotifyUrlInfo(fetch);
 
@@ -24,7 +26,6 @@ const soundcloud = new SoundCloud();
 class Player extends EventEmitter<PlayerEvents> {
     public readonly client: Client;
     public readonly options: PlayerInitOptions = {
-        autoRegisterExtractor: true,
         ytdlOptions: {
             highWaterMark: 1 << 25
         },
@@ -60,10 +61,6 @@ class Player extends EventEmitter<PlayerEvents> {
         this.options = Object.assign(this.options, options);
 
         this.client.on("voiceStateUpdate", this._handleVoiceState.bind(this));
-
-        if (this.options?.autoRegisterExtractor) {
-            let nv: any; // eslint-disable-line @typescript-eslint/no-explicit-any
-        }
     }
 
     /**
@@ -271,44 +268,33 @@ class Player extends EventEmitter<PlayerEvents> {
         switch (qt) {
             case QueryType.YOUTUBE_VIDEO: {
                 let agent;
-                let poToken;
-                let visitorData;
-                let oauth2;
-                if (this.options.ytdlAgent) {
-                    if (this.options.ytdlAgent.proxyUri) {
-                        agent = await YtdlCore.createProxyAgent({ uri: this.options.ytdlAgent.proxyUri });
-                    }
-                    if (this.options.ytdlAgent.poToken && this.options.ytdlAgent.visitorData) {
-                        poToken = this.options.ytdlAgent.poToken;
-                        visitorData = this.options.ytdlAgent.visitorData;
-                    }
-                    if (this.options.ytdlAgent.oauth2 && this.options.ytdlAgent.oauth2.accessToken && this.options.ytdlAgent.oauth2.refreshToken && this.options.ytdlAgent.oauth2.expiryDate) {
-                        oauth2 = new YtdlCore.OAuth2({
-                            accessToken: this.options.ytdlAgent.oauth2.accessToken,
-                            refreshToken: this.options.ytdlAgent.oauth2.refreshToken,
-                            expiryDate: this.options.ytdlAgent.oauth2.expiryDate,
-                        });
+                if (this.options.ytdlAgent && this.options.ytdlAgent.type && this.options.ytdlAgent.type === "proxy") {
+                    if (this.options.ytdlAgent.proxyUri && this.options.ytdlAgent.cookies) {
+                        agent = await ytdl.createProxyAgent({ uri: this.options.ytdlAgent.proxyUri }, this.options.ytdlAgent.cookies);
+                    } else if (this.options.ytdlAgent.proxyUri) {
+                        agent = await ytdl.createProxyAgent({ uri: this.options.ytdlAgent.proxyUri });
                     }
                 }
-                const info = await YtdlCore.getFullInfo(query, {
+                if (this.options.ytdlAgent && this.options.ytdlAgent.type && this.options.ytdlAgent.type === "cookie") {
+                    if (this.options.ytdlAgent.cookies) {
+                        agent = await ytdl.createAgent(this.options.ytdlAgent.cookies);
+                    }
+                }
+                const info = await ytdlGetInfo(query, {
                     ...this.options.ytdlOptions,
                     agent: agent || null,
-                    oauth2: oauth2 || null,
-                    poToken: poToken || null,
-                    visitorData: visitorData || null
                 }).catch(Util.noop);
-
                 if (!info) return { playlist: null, tracks: [] };
 
                 const track = new Track(this, {
                     title: info.videoDetails.title,
                     description: info.videoDetails.description,
                     author: info.videoDetails.author?.name,
-                    url: info.videoDetails.videoUrl,
+                    url: info.videoDetails.video_url,
                     requestedBy: options.requestedBy as User,
                     thumbnail: Util.last(info.videoDetails.thumbnails)?.url,
-                    views: parseInt(String(info.videoDetails.viewCount).replace(/[^0-9]/g, "")) || 0,
-                    duration: Util.buildTimeCode(Util.parseMS(info.videoDetails.lengthSeconds * 1000)),
+                    views: parseInt(info.videoDetails.viewCount.replace(/[^0-9]/g, "")) || 0,
+                    duration: Util.buildTimeCode(Util.parseMS(parseInt(info.videoDetails.lengthSeconds) * 1000)),
                     source: "youtube",
                     raw: info
                 });

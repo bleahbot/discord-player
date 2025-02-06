@@ -4,7 +4,7 @@ import { Queue } from "../Structures/Queue";
 import Track from "../Structures/Track";
 import { Playlist } from "../Structures/Playlist";
 import { StreamDispatcher } from "../VoiceInterface/StreamDispatcher";
-import { YTDL_DownloadOptions } from "@ybd-project/ytdl-core/package/types/options";
+import { downloadOptions } from "@distube/ytdl-core";
 
 export type FiltersName = keyof QueueFilters;
 
@@ -145,20 +145,15 @@ export interface PlayerOptions {
     leaveOnEnd?: boolean;
     leaveOnEndCooldown?: number;
     leaveOnStop?: boolean;
-    leaveOnEmpty?: boolean; 
+    leaveOnEmpty?: boolean;
     leaveOnEmptyCooldown?: number;
     autoSelfDeaf?: boolean;
-    ytdlOptions?: YTDL_DownloadOptions;
+    ytdlOptions?: downloadOptions;
     ytdlAgent?: {
-        proxyUri?: string;
-        poToken?: string;
-        visitorData?: string;
-        oauth2?: {
-            accessToken: string;
-            refreshToken: string;
-            expiryDate: string;
-        };
-    };
+        type: "proxy" | "cookie";
+        proxyUri: string;
+        cookies: any;
+    }
     initialVolume?: number;
     bufferingTimeout?: number;
     spotifyBridge?: boolean;
@@ -484,23 +479,16 @@ export interface PlaylistJSON {
 
 /**
  * @typedef {object} PlayerInitOptions
- * @property {boolean} [autoRegisterExtractor=true] If it should automatically register extractors
- * @property {YTDLDownloadOptions} [ytdlOptions={}] The options passed to `@ybd-project/ytdl-core`
+ * @property {YTDLDownloadOptions} [ytdlOptions={}] The options passed to `@distube/ytdl-core`
  * @property {YTDLAgent} [ytdlAgent={}] The youtube agent
  * @property {number} [connectionTimeout=20000] The voice connection timeout
  */
 export interface PlayerInitOptions {
-    autoRegisterExtractor?: boolean;
-    ytdlOptions?: YTDL_DownloadOptions;
+    ytdlOptions?: downloadOptions;
     ytdlAgent?: {
-        proxyUri?: string;
-        poToken?: string;
-        visitorData?: string;
-        oauth2?: {
-            accessToken: string;
-            refreshToken: string;
-            expiryDate: string;
-        };
-    };
+        type: "proxy" | "cookie";
+        proxyUri: string;
+        cookies: any;
+    }
     connectionTimeout?: number;
 }

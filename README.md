@@ -4,7 +4,6 @@ This is a fork of discord-player module
 Complete framework to facilitate music commands using **[discord.js](https://discord.js.org)**.
 
 ## Installation
-
 > ⚠️ Discord Player requires Discord.js 13.x. Please ensure that you have a compatible version by running npm list discord.js in your terminal.
 
 ### Install **[@bleah/discord-player](https://npmjs.com/package/@bleah/discord-player)**
@@ -161,81 +160,64 @@ import "@bleah/discord-player/smoothVolume"
 
 > ⚠️ Make sure that line is situated at the **TOP** of your **main** file.
 
-### Use PoToken
-
-The **poToken** can be used to avoid bot errors and must be specified with visitorData. If you need to obtain poToken or visitorData, please use one of the following repositories to generate them.
-
-1. https://github.com/YunzheZJU/youtube-po-token-generator (recommended)
-2. https://github.com/iv-org/youtube-trusted-session-generator
-3. https://github.com/fsholehan/scrape-youtube
-
-#### Example
+### Use cookies
 
 ```js
 const player = new Player(client, {
     ytdlAgent: {
-        poToken: "",
-        visitorData: ""
+        type: 'cookie',
+        cookies: [
+          {
+            domain: ".youtube.com",
+            expirationDate: 1234567890,
+            hostOnly: false,
+            httpOnly: true,
+            name: "LOGIN_INFO",
+            path: "/",
+            sameSite: "no_restriction",
+            secure: true,
+            session: false,
+            value: "---xxx---",
+          },
+          "...",
+        ]
     }
 });
 ```
-
-### Use OAuth2
-
-These can be used to avoid age restrictions and bot errors. See below for instructions on how to use them. If you need to obtain OAuth2 tokens, please use one of the following repositories to generate them.
-
-1. https://github.com/imputnet/cobalt
-
-#### Cobalt Token generation
-
-```bash
-git clone https://github.com/imputnet/cobalt
-cd cobalt/api/src
-npm install -g pnpm
-pnpm install
-npm run token:youtube
-```
-
-#### Example
-
-```js
-const player = new Player(client, {
-    ytdlAgent: {
-        oauth2: {
-            accessToken: "",
-            refreshToken: "",
-            expiryDate: "yyyy-MM-ddThh-mm-ssZ"
-        }
-    }
-});
-```
-
-> ⚠️ Be sure to generate tokens with accounts that can be banned, as accounts may be banned.
-> The specified OAuth2 token is automatically updated, so you do not need to update it yourself.
 
 ### Use custom proxy
 
 ```js
 const player = new Player(client, {
     ytdlAgent: {
-        proxyUri: "my.proxy.server"
+        type: 'proxy',
+        proxyUri: 'my.proxy.server'
     }
 });
 ```
 
-### Use custom proxy with PoToken and OAuth2
+### Use custom proxy with cookies
 
 ```js
 const player = new Player(client, {
     ytdlAgent: {
-        proxyUri: "my.proxy.server",
-        poToken: "",
-        visitorData: "",
-        oauth2: {
-            accessToken: "",
-            refreshToken: "",
-            expiryDate: "yyyy-MM-ddThh-mm-ssZ"
-        }
+        type: 'proxy',
+        proxyUri: 'my.proxy.server',
+        cookies: [
+          {
+            domain: ".youtube.com",
+            expirationDate: 1234567890,
+            hostOnly: false,
+            httpOnly: true,
+            name: "LOGIN_INFO",
+            path: "/",
+            sameSite: "no_restriction",
+            secure: true,
+            session: false,
+            value: "---xxx---",
+          },
+          "...",
+        ]
     }
 });
 ```
@@ -243,11 +225,20 @@ const player = new Player(client, {
 > You may also create a simple proxy server and forward requests through it.
 > See **[https://github.com/http-party/node-http-proxy](https://github.com/http-party/node-http-proxy)** for more info.
 
+#### How to get cookies
+
+- Install [Get cookies.txt LOCALLY](https://github.com/kairi003/Get-cookies.txt-LOCALLY) extension for your browser.
+- Go to [YouTube](https://www.youtube.com/).
+- Log in to your account. (You should use a new account for this purpose)
+- Change the export format to JSON.
+- Click on the extension icon and click "Copy" button.
+- Your cookie will be added to your clipboard and paste it into your code.
+
 ### Custom stream Engine
 
-Discord Player by default uses **[@ybd-project/ytdl-core](https://github.com/ybd-project/ytdl-core)** for youtube and some other extractors for other sources.
+Discord Player by default uses **[@distube/ytdl-core](https://github.com/distubejs/ytdl-core)** for youtube and some other extractors for other sources.
 If you need to modify this behavior without touching extractors, you need to use `createStream` functionality of discord player.
-Here's an example on how you can use **[play-dl](https://npmjs.com/package/play-dl)** to download youtube streams instead of using @ybd-project/ytdl-core.
+Here's an example on how you can use **[play-dl](https://npmjs.com/package/play-dl)** to download youtube streams instead of using @distube/ytdl-core.
 
 ```js
 const playdl = require("play-dl");
