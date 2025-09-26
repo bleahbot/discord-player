@@ -1,6 +1,6 @@
 {
   "name": "@bleah/discord-player",
-  "version": "6.2.4",
+  "version": "6.2.8",
   "description": "This is a fork of discord-player module",
   "main": "dist/index.js",
   "files": [
@@ -43,7 +43,7 @@
     "discord-music",
     "music-player",
     "youtube-dl",
-    "@distube/ytdl-core",
+    "@bleah/ytdl-core",
     "ytdl",
     "lavalink",
     "api"
@@ -54,8 +54,9 @@
     "url": "https://github.com/bleahbot/discord-player/issues"
   },
   "dependencies": {
+    "@bleah/ytdl-core": "^4.18.2",
+    "@discordjs/opus": "^0.10.0",
     "@discordjs/voice": "^0.16.0",
-    "@distube/ytdl-core": "^4.16.0",
     "isomorphic-unfetch": "^4.0.2",
     "libsodium-wrappers": "^0.7.9",
     "prism-media": "^1.3.5",
@@ -69,7 +70,6 @@
     "@babel/core": "^7.16.0",
     "@babel/preset-env": "^7.16.4",
     "@babel/preset-typescript": "^7.16.0",
-    "@discordjs/opus": "^0.9.0",
     "@types/node": "^18.6.3",
     "@types/ws": "^8.5.3",
     "@typescript-eslint/eslint-plugin": "^5.4.0",

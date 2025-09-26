@@ -1,4 +1,4 @@
-import ytdl, { downloadOptions } from '@distube/ytdl-core';
+import ytdl, { downloadOptions } from '@bleah/ytdl-core';
 import { opus as Opus, FFmpeg } from 'prism-media';
 import { Readable, Duplex } from 'stream';
 

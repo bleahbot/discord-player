@@ -11,7 +11,7 @@ import { Util } from "./utils/Util";
 import fetch from 'isomorphic-unfetch';
 import { PlayerError, ErrorStatusCode } from "./Structures/PlayerError";
 import ytdl from "./utils/DiscordYTDL";
-import { getInfo as ytdlGetInfo } from "@distube/ytdl-core";
+import { getInfo as ytdlGetInfo } from "@bleah/ytdl-core";
 import { Client as SoundCloud, SearchResult as SoundCloudSearchResult } from "soundcloud-scraper";
 import { Playlist } from "./Structures/Playlist";
 import { ExtractorModel } from "./Structures/ExtractorModel";

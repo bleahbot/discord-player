@@ -4,7 +4,7 @@ import { Queue } from "../Structures/Queue";
 import Track from "../Structures/Track";
 import { Playlist } from "../Structures/Playlist";
 import { StreamDispatcher } from "../VoiceInterface/StreamDispatcher";
-import { downloadOptions } from "@distube/ytdl-core";
+import { downloadOptions } from "@bleah/ytdl-core";
 
 export type FiltersName = keyof QueueFilters;
 
@@ -479,7 +479,7 @@ export interface PlaylistJSON {
 
 /**
  * @typedef {object} PlayerInitOptions
- * @property {YTDLDownloadOptions} [ytdlOptions={}] The options passed to `@distube/ytdl-core`
+ * @property {YTDLDownloadOptions} [ytdlOptions={}] The options passed to `@bleah/ytdl-core`
  * @property {YTDLAgent} [ytdlAgent={}] The youtube agent
  * @property {number} [connectionTimeout=20000] The voice connection timeout
  */

@@ -236,9 +236,9 @@ const player = new Player(client, {
 
 ### Custom stream Engine
 
-Discord Player by default uses **[@distube/ytdl-core](https://github.com/distubejs/ytdl-core)** for youtube and some other extractors for other sources.
+Discord Player by default uses **[@bleah/ytdl-core](https://github.com/bleah/ytdl-core)** for youtube and some other extractors for other sources.
 If you need to modify this behavior without touching extractors, you need to use `createStream` functionality of discord player.
-Here's an example on how you can use **[play-dl](https://npmjs.com/package/play-dl)** to download youtube streams instead of using @distube/ytdl-core.
+Here's an example on how you can use **[play-dl](https://npmjs.com/package/play-dl)** to download youtube streams instead of using @bleah/ytdl-core.
 
 ```js
 const playdl = require("play-dl");

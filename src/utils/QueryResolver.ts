@@ -1,4 +1,4 @@
-import { validateID, validateURL } from "@distube/ytdl-core";
+import { validateID, validateURL } from "@bleah/ytdl-core";
 import { YouTube } from "youtube-sr";
 import { QueryType } from "../types/types";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment

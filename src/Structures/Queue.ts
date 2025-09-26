@@ -694,7 +694,7 @@ class Queue<T = unknown> {
                 stream = ytdl(link, {
                     agent: agent || null,
                     ...this.options.ytdlOptions,
-                    // discord-@distube/ytdl-core
+                    // discord-@bleah/ytdl-core
                     opusEncoded: false,
                     fmt: "s16le",
                     encoderArgs: options.encoderArgs ?? this._activeFilters.length ? ["-af", AudioFilters.create(this._activeFilters)] : [],
