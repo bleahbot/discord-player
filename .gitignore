@@ -5,6 +5,7 @@ yarn.lock
 
 # Compiled files
 dist
+output
 
 # Yarn logs
 yarn*.log

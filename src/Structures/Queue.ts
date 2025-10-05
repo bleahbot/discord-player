@@ -3,13 +3,14 @@ import { Player } from "../Player";
 import { StreamDispatcher } from "../VoiceInterface/StreamDispatcher";
 import Track from "./Track";
 import { PlayerOptions, PlayerProgressbarOptions, PlayOptions, QueueFilters, QueueRepeatMode, TrackSource } from "../types/types";
-import ytdl from "../utils/DiscordYTDL";
+import ytdlp from "../utils/YTDLP";
 import { AudioResource, StreamType } from "@discordjs/voice";
 import { Util } from "../utils/Util";
 import YouTube from "youtube-sr";
 import AudioFilters from "../utils/AudioFilters";
 import { PlayerError, ErrorStatusCode } from "./PlayerError";
 import type { Readable } from "stream";
+import type { YTDLPAgent } from '../types/types';
 import { VolumeTransformer } from "../VoiceInterface/VolumeTransformer";
 
 class Queue<T = unknown> {
@@ -102,11 +103,8 @@ class Queue<T = unknown> {
                 leaveOnEmpty: true,
                 leaveOnEmptyCooldown: 1000,
                 autoSelfDeaf: true,
-                ytdlOptions: {
-                    highWaterMark: 1 << 25
-                },
-                ytdlAgent: {
-                    type: null,
+                ytdlpAgent: {
+                    forceIPv4: false
                 },
                 initialVolume: 100,
                 bufferingTimeout: 3000,
@@ -653,77 +651,119 @@ class Queue<T = unknown> {
         let stream = null;
         const customDownloader = typeof this.onBeforeCreateStream === "function";
 
-        if (["youtube", "spotify"].includes(track.raw.source)) {
+        const isYoutubeLike = ["youtube", "spotify"].includes(track.raw.source);
+        const encoderArgs =
+            options.encoderArgs ??
+            (this._activeFilters.length ? ["-af", AudioFilters.create(this._activeFilters)] : []);
+        const seekSecs = options.seek ? options.seek / 1000 : 0;
+
+        const attachStreamError = (s: Readable | null) => {
+            if (!s) return s;
+            s.on("error", (err: Error) => {
+                const msg = err?.message?.toLowerCase?.() || "";
+                if (!msg.includes("premature close")) this.player.emit("error", this, err);
+            });
+            return s;
+        };
+
+        const buildAgent = (): YTDLPAgent | undefined => {
+            const a = (this.options as any)?.ytdlpAgent as Partial<YTDLPAgent> | undefined;
+            if (!a) return;
+
+            const base: Partial<YTDLPAgent> = {};
+
+            if (a.proxyUri?.trim()) base.proxyUri = a.proxyUri.trim();
+
+            if (a.cookiesFromBrowser) base.cookiesFromBrowser = a.cookiesFromBrowser;
+            if (a.cookiesFile?.trim()) base.cookiesFile = a.cookiesFile.trim();
+            if (a.cookiesJsonPath?.trim()) base.cookiesJsonPath = a.cookiesJsonPath.trim();
+
+            if (a.cookiesHeader?.trim()) base.cookiesHeader = a.cookiesHeader.trim();
+
+            if (typeof a.cookies === 'string') {
+                if (a.cookies.trim()) base.cookies = a.cookies.trim();
+            } else if (Array.isArray(a.cookies)) {
+                if (a.cookies.length) base.cookies = a.cookies;
+            } else if (a.cookies && Object.keys(a.cookies).length) {
+                base.cookies = a.cookies;
+            }
+
+            if (a.noUA) base.noUA = true;
+            if (a.forceIPv4) base.forceIPv4 = true;
+
+            if (typeof a.autoCookiesFromBrowser === 'boolean')
+                base.autoCookiesFromBrowser = a.autoCookiesFromBrowser;
+
+            return Object.keys(base).length ? (base as YTDLPAgent) : undefined;
+        };
+
+        if (isYoutubeLike) {
             let spotifyResolved = false;
+
             if (this.options.spotifyBridge && track.raw.source === "spotify" && !track.raw.engine) {
                 track.raw.engine = await YouTube.search(`${track.author} ${track.title}`, { type: "video" })
-                    .then((x) => x[0].url)
+                    .then((x) => x[0]?.url)
                     .catch(() => null);
                 spotifyResolved = true;
             }
+
             const link = track.raw.source === "spotify" ? track.raw.engine : track.url;
             if (!link) return void this.play(this.tracks.shift(), { immediate: true });
 
             if (customDownloader) {
-                stream = (await this.onBeforeCreateStream(track, spotifyResolved ? "youtube" : track.raw.source, this)) ?? null;
-                if (stream)
-                    stream = ytdl
-                        .arbitraryStream(stream, {
-                            opusEncoded: false,
-                            fmt: "s16le",
-                            encoderArgs: options.encoderArgs ?? this._activeFilters.length ? ["-af", AudioFilters.create(this._activeFilters)] : [],
-                            seek: options.seek ? options.seek / 1000 : 0
-                        })
-                        .on("error", (err: Error) => {
-                            return err.message.toLowerCase().includes("premature close") ? null : this.player.emit("error", this, err);
-                        });
+                const pre =
+                    (await this.onBeforeCreateStream(track, spotifyResolved ? "youtube" : track.raw.source, this)) ?? null;
+
+                stream = pre
+                    ? ytdlp.arbitraryStream(pre, {
+                        opusEncoded: false,
+                        fmt: "s16le",
+                        encoderArgs,
+                        seek: seekSecs
+                    })
+                    : null;
+
+                attachStreamError(stream);
             } else {
-                let agent;
-                if (this.options.ytdlAgent && this.options.ytdlAgent.type && this.options.ytdlAgent.type === "proxy") {
-                    if (this.options.ytdlAgent.proxyUri && this.options.ytdlAgent.cookies) {
-                        agent = await ytdl.createProxyAgent({ uri: this.options.ytdlAgent.proxyUri }, this.options.ytdlAgent.cookies);
-                    } else if (this.options.ytdlAgent.proxyUri) {
-                        agent = await ytdl.createProxyAgent({ uri: this.options.ytdlAgent.proxyUri });
-                    }
+                const agent = buildAgent();
+                try {
+                    stream = await ytdlp.createPCMStream(link, {
+                        agent: agent || null,
+                        opusEncoded: false,
+                        fmt: "s16le",
+                        encoderArgs,
+                        seek: seekSecs
+                    });
+                } catch (err) {
+                    this.player.emit("error", this, err as Error);
+                    return void this.play(this.tracks.shift(), { immediate: true });
                 }
-                if (this.options.ytdlAgent && this.options.ytdlAgent.type && this.options.ytdlAgent.type === "cookie") {
-                    if (this.options.ytdlAgent.cookies) {
-                        agent = await ytdl.createAgent(this.options.ytdlAgent.cookies);
-                    }
-                }
-                stream = ytdl(link, {
-                    agent: agent || null,
-                    ...this.options.ytdlOptions,
-                    // discord-@bleah/ytdl-core
-                    opusEncoded: false,
-                    fmt: "s16le",
-                    encoderArgs: options.encoderArgs ?? this._activeFilters.length ? ["-af", AudioFilters.create(this._activeFilters)] : [],
-                    seek: options.seek ? options.seek / 1000 : 0
-                }).on("error", (err: Error) => {
-                    return err.message.toLowerCase().includes("premature close") ? null : this.player.emit("error", this, err);
-                });
+                attachStreamError(stream);
             }
         } else {
-            const tryArb = (customDownloader && (await this.onBeforeCreateStream(track, track.raw.source || track.raw.engine, this))) || null;
-            const arbitrarySource = tryArb
-                ? tryArb
+            const preCustom =
+                (customDownloader &&
+                    (await this.onBeforeCreateStream(track, track.raw.source || track.raw.engine, this))) ||
+                null;
+
+            const arbitrarySource = preCustom
+                ? preCustom
                 : track.raw.source === "soundcloud"
-                ? await track.raw.engine.downloadProgressive()
-                : track.raw.source === "attachment"
-                ? await track.url
-                : typeof track.raw.engine === "function"
-                ? await track.raw.engine()
-                : track.raw.engine;
-            stream = ytdl
-                .arbitraryStream(arbitrarySource, {
-                    opusEncoded: false,
-                    fmt: "s16le",
-                    encoderArgs: options.encoderArgs ?? this._activeFilters.length ? ["-af", AudioFilters.create(this._activeFilters)] : [],
-                    seek: options.seek ? options.seek / 1000 : 0
-                })
-                .on("error", (err: Error) => {
-                    return err.message.toLowerCase().includes("premature close") ? null : this.player.emit("error", this, err);
-                });
+                    ? await track.raw.engine
+                    : track.raw.source === "attachment"
+                        ? await track.url
+                        : typeof track.raw.engine === "function"
+                            ? await track.raw.engine()
+                            : track.raw.engine;
+
+            stream = ytdlp.arbitraryStream(arbitrarySource, {
+                opusEncoded: false,
+                fmt: "s16le",
+                encoderArgs,
+                seek: seekSecs
+            });
+
+            attachStreamError(stream);
         }
 
         const resource: AudioResource<Track> = this.connection.createStream(stream, {

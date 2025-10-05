@@ -2,5 +2,5 @@ src/
 tslint.json
 tsconfig.json
 .prettierrc
-test/
-demo/
+output/
+test-ytdlp.js

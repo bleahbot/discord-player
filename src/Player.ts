@@ -10,9 +10,7 @@ import YouTube from "youtube-sr";
 import { Util } from "./utils/Util";
 import fetch from 'isomorphic-unfetch';
 import { PlayerError, ErrorStatusCode } from "./Structures/PlayerError";
-import ytdl from "./utils/DiscordYTDL";
-import { getInfo as ytdlGetInfo } from "@bleah/ytdl-core";
-import { Client as SoundCloud, SearchResult as SoundCloudSearchResult } from "soundcloud-scraper";
+import { getInfo as ytdlpGetInfo } from "./utils/YTDLP";
 import { Playlist } from "./Structures/Playlist";
 import { ExtractorModel } from "./Structures/ExtractorModel";
 import { generateDependencyReport } from "@discordjs/voice";
@@ -21,13 +19,27 @@ import spotifyUrlInfo from 'spotify-url-info';
 
 const Spotify = spotifyUrlInfo(fetch);
 
-const soundcloud = new SoundCloud();
+import type Soundcloud from "soundcloud.ts";
+
+type SoundCloudCtor = new (clientId?: string, oauth?: string) => Soundcloud;
+
+let soundcloud: Soundcloud | null = null;
+
+export async function getSC() {
+    if (soundcloud) return soundcloud;
+    const mod = await import("soundcloud.ts");
+    const Ctor = mod.default as unknown as SoundCloudCtor;
+    soundcloud = new Ctor();
+    return soundcloud;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 class Player extends EventEmitter<PlayerEvents> {
     public readonly client: Client;
     public readonly options: PlayerInitOptions = {
-        ytdlOptions: {
-            highWaterMark: 1 << 25
+        ytdlpAgent: {
+            forceIPv4: false
         },
         connectionTimeout: 20000
     };
@@ -153,8 +165,7 @@ class Player extends EventEmitter<PlayerEvents> {
         const _meta = queueInitOptions.metadata;
         delete queueInitOptions["metadata"];
         queueInitOptions.volumeSmoothness ??= 0.08;
-        queueInitOptions.ytdlOptions ??= this.options.ytdlOptions;
-        queueInitOptions.ytdlAgent ??= this.options.ytdlAgent;
+        queueInitOptions.ytdlpAgent ??= this.options.ytdlpAgent;
         const queue = new Queue(this, guild, queueInitOptions);
         queue.metadata = _meta;
         this.queues.set(guild.id, queue);
@@ -185,7 +196,7 @@ class Player extends EventEmitter<PlayerEvents> {
 
         try {
             prev.destroy();
-        } catch {} // eslint-disable-line no-empty
+        } catch { } // eslint-disable-line no-empty
         this.queues.delete(guild.id);
 
         return prev;
@@ -203,6 +214,8 @@ class Player extends EventEmitter<PlayerEvents> {
      * @returns {Promise<PlayerSearchResult>}
      */
     async search(query: string | Track, options: SearchOptions): Promise<PlayerSearchResult> {
+        const sc = await getSC();
+
         if (query instanceof Track) return { playlist: query.playlist || null, tracks: [query] };
         if (!options) throw new PlayerError("DiscordPlayer#search needs search options!", ErrorStatusCode.INVALID_ARG_TYPE);
         options.requestedBy = this.client.users.resolve(options.requestedBy);
@@ -215,9 +228,9 @@ class Player extends EventEmitter<PlayerEvents> {
                 const playlist = !data.playlist
                     ? null
                     : new Playlist(this, {
-                          ...data.playlist,
-                          tracks: []
-                      });
+                        ...data.playlist,
+                        tracks: []
+                    });
 
                 const tracks = data.data.map(
                     (m) =>
@@ -244,9 +257,9 @@ class Player extends EventEmitter<PlayerEvents> {
                 const playlist = !data.playlist
                     ? null
                     : new Playlist(this, {
-                          ...data.playlist,
-                          tracks: []
-                      });
+                        ...data.playlist,
+                        tracks: []
+                    });
 
                 const tracks = data.data.map(
                     (m) =>
@@ -267,101 +280,123 @@ class Player extends EventEmitter<PlayerEvents> {
         const qt = options.searchEngine === QueryType.AUTO ? QueryResolver.resolve(query) : options.searchEngine;
         switch (qt) {
             case QueryType.YOUTUBE_VIDEO: {
-                let agent;
-                if (this.options.ytdlAgent && this.options.ytdlAgent.type && this.options.ytdlAgent.type === "proxy") {
-                    if (this.options.ytdlAgent.proxyUri && this.options.ytdlAgent.cookies) {
-                        agent = await ytdl.createProxyAgent({ uri: this.options.ytdlAgent.proxyUri }, this.options.ytdlAgent.cookies);
-                    } else if (this.options.ytdlAgent.proxyUri) {
-                        agent = await ytdl.createProxyAgent({ uri: this.options.ytdlAgent.proxyUri });
-                    }
-                }
-                if (this.options.ytdlAgent && this.options.ytdlAgent.type && this.options.ytdlAgent.type === "cookie") {
-                    if (this.options.ytdlAgent.cookies) {
-                        agent = await ytdl.createAgent(this.options.ytdlAgent.cookies);
-                    }
-                }
-                const info = await ytdlGetInfo(query, {
-                    ...this.options.ytdlOptions,
-                    agent: agent || null,
-                }).catch(Util.noop);
+                const agent = this.options.ytdlpAgent ? { ...(this.options.ytdlpAgent as any) } : null;
+
+                const info = await ytdlpGetInfo(query, {
+                    agent: agent || null
+                }).catch(() => null);
+
                 if (!info) return { playlist: null, tracks: [] };
 
                 const track = new Track(this, {
                     title: info.videoDetails.title,
-                    description: info.videoDetails.description,
-                    author: info.videoDetails.author?.name,
+                    description: info.videoDetails.description || "",
+                    author: info.videoDetails.author?.name || info.raw.uploader_id || "Unknown",
                     url: info.videoDetails.video_url,
                     requestedBy: options.requestedBy as User,
-                    thumbnail: Util.last(info.videoDetails.thumbnails)?.url,
+                    thumbnail: (info.videoDetails.thumbnails?.length ? info.videoDetails.thumbnails.slice(-1)[0]?.url : undefined) || "",
                     views: parseInt(info.videoDetails.viewCount.replace(/[^0-9]/g, "")) || 0,
                     duration: Util.buildTimeCode(Util.parseMS(parseInt(info.videoDetails.lengthSeconds) * 1000)),
                     source: "youtube",
-                    raw: info
+                    raw: info.raw
                 });
 
                 return { playlist: null, tracks: [track] };
             }
-            case QueryType.YOUTUBE_SEARCH: {
-                const videos = await YouTube.search(query, {
-                    type: "video"
-                }).catch(Util.noop);
-                if (!videos) return { playlist: null, tracks: [] };
 
-                const tracks = videos.map((m) => {
-                    (m as any).source = "youtube"; // eslint-disable-line @typescript-eslint/no-explicit-any
-                    return new Track(this, {
+            case QueryType.YOUTUBE_SEARCH: {
+                let videos: any[] = [];
+                try {
+                videos = await YouTube.search(query, { type: "video" }) as any[];
+                } catch {}
+
+                if (videos && videos.length) {
+                    const tracks = videos.map((m: any) => new Track(this, {
                         title: m.title,
-                        description: m.description,
-                        author: m.channel?.name,
+                        description: m.description || "",
+                        author: m.channel?.name || "Unknown",
                         url: m.url,
                         requestedBy: options.requestedBy as User,
-                        thumbnail: m.thumbnail?.displayThumbnailURL("maxresdefault"),
+                        thumbnail: m.thumbnail?.displayThumbnailURL?.("maxresdefault"),
                         views: m.views,
                         duration: m.durationFormatted,
                         source: "youtube",
                         raw: m
-                    });
-                });
+                    }));
+
+                    return { playlist: null, tracks };
+                }
+
+                const agent = this.options.ytdlpAgent ? { ...(this.options.ytdlpAgent as any) } : null;
+
+                const q = `ytsearch15:"${String(query).trim()}"`;
+
+                const info = await ytdlpGetInfo(q, { agent }).catch(() => null);
+                const entries: any[] = (info && (info as any).entries) ? (info as any).entries : [];
+
+                if (!entries.length) return { playlist: null, tracks: [] };
+
+                const tracks = entries.map((r: any) => new Track(this, {
+                    title: r.title,
+                    description: r.description || "",
+                    author: r.channel || r.uploader_id || "Unknown",
+                    url: r.webpage_url ?? r.url,
+                    requestedBy: options.requestedBy as User,
+                    thumbnail: Array.isArray(r.thumbnails) ? r.thumbnails.slice(-1)[0]?.url : (r.thumbnail || ""),
+                    views: Number(r.view_count || 0),
+                    duration: Util.buildTimeCode(Util.parseMS((Number(r.duration || 0) * 1000) || 0)),
+                    source: "youtube",
+                    raw: r
+                }));
 
                 return { playlist: null, tracks };
             }
             case QueryType.SOUNDCLOUD_TRACK:
             case QueryType.SOUNDCLOUD_SEARCH: {
-                const result: SoundCloudSearchResult[] = QueryResolver.resolve(query) === QueryType.SOUNDCLOUD_TRACK ? [{ url: query }] : await soundcloud.search(query, "track").catch(() => []);
-                if (!result || !result.length) return { playlist: null, tracks: [] };
-                const res: Track[] = [];
+                let results: any[] = [];
 
-                for (const r of result) {
-                    const trackInfo = await soundcloud.getSongInfo(r.url).catch(Util.noop);
-                    if (!trackInfo) continue;
-
-                    const track = new Track(this, {
-                        title: trackInfo.title,
-                        url: trackInfo.url,
-                        duration: Util.buildTimeCode(Util.parseMS(trackInfo.duration)),
-                        description: trackInfo.description,
-                        thumbnail: trackInfo.thumbnail,
-                        views: trackInfo.playCount,
-                        author: trackInfo.author.name,
-                        requestedBy: options.requestedBy,
-                        source: "soundcloud",
-                        engine: trackInfo
-                    });
-
-                    res.push(track);
+                if (QueryResolver.resolve(query) === QueryType.SOUNDCLOUD_TRACK) {
+                    const t = await sc.tracks.get(query).catch(Util.noop);
+                    if (t) results = [t as any];
+                } else {
+                    // soundcloud.ts search
+                    const found: any = await sc.tracks.search({ q: query, limit: 10, offset: 0 }).catch(Util.noop);
+                    results = Array.isArray(found) ? found : (found?.collection || []);
                 }
 
-                return { playlist: null, tracks: res };
+                if (!results || !results.length) return { playlist: null, tracks: [] };
+
+                const tracks = results.map((t: any) => new Track(this, {
+                    title: t?.title || "Unknown Title",
+                    url: t?.permalink_url || t?.permalinkUrl || t?.url,
+                    duration: Util.buildTimeCode(Util.parseMS(t?.duration || 0)),
+                    description: t?.description || "",
+                    thumbnail: (t?.artwork_url || t?.artworkUrl || t?.user?.avatar_url || t?.user?.avatarUrl || "https://soundcloud.com/pwa-icon-192.png")
+                        .replace?.("-large", "-t500x500") || "https://soundcloud.com/pwa-icon-192.png",
+                    views: t?.playback_count ?? t?.playCount ?? 0,
+                    author: t?.user?.username || t?.user?.name || "Unknown Artist",
+                    requestedBy: options.requestedBy as User,
+                    source: "soundcloud",
+                    engine: sc.util.streamTrack(t.permalink_url)
+                }));
+
+                return { playlist: null, tracks };
             }
+
             case QueryType.SPOTIFY_SONG: {
                 const spotifyData = await Spotify.getData(query).catch(Util.noop);
                 if (!spotifyData) return { playlist: null, tracks: [] };
                 const spotifyTrack = new Track(this, {
                     title: spotifyData.name,
                     description: spotifyData.subtitle ? `${spotifyData.title} - ${spotifyData.subtitle}` : "",
-                    author: spotifyData.subtitle ?? "Unknown Artist",
+                    author: (
+                        (spotifyData.artists ?? spotifyData.track?.artists ?? spotifyData.album?.artists ?? [])
+                            .map((a: any) => a?.name)
+                            .filter(Boolean)
+                            .join(', ') || "Unknown Artist"
+                    ),
                     url: spotifyData.id ? `https://open.spotify.com/track/${spotifyData.id}` : query,
-                    thumbnail: spotifyData.coverArt?.sources?.[0]?.url || "https://www.scdn.co/i/_global/twitter_card-default.jpg",
+                    thumbnail: spotifyData.visualIdentity?.image?.[0]?.url || "https://www.scdn.co/i/_global/twitter_card-default.jpg",
                     duration: Util.buildTimeCode(Util.parseMS(spotifyData.duration ?? spotifyData.duration ?? 0)),
                     views: 0,
                     requestedBy: options.requestedBy,
@@ -378,19 +413,19 @@ class Player extends EventEmitter<PlayerEvents> {
                 const playlist = new Playlist(this, {
                     title: spotifyPlaylist.title,
                     description: spotifyPlaylist.subtitle ? `${spotifyPlaylist.title} - ${spotifyPlaylist.subtitle}` : "",
-                    thumbnail: spotifyPlaylist.coverArt?.sources?.[0]?.url || "https://www.scdn.co/i/_global/twitter_card-default.jpg",
+                    thumbnail: spotifyPlaylist.visualIdentity?.image?.[0]?.url || "https://www.scdn.co/i/_global/twitter_card-default.jpg",
                     type: spotifyPlaylist.type,
                     source: "spotify",
                     author:
                         spotifyPlaylist.type !== "playlist"
                             ? {
-                                  name: spotifyPlaylist.subtitle ?? "Unknown Artist",
-                                  url: null as unknown as string
-                              }
+                                name: spotifyPlaylist.subtitle ?? "Unknown Artist",
+                                url: null as unknown as string
+                            }
                             : {
-                                  name: spotifyPlaylist.subtitle ?? "Unknown Artist",
-                                  url: null as unknown as string
-                              },
+                                name: spotifyPlaylist.subtitle ?? "Unknown Artist",
+                                url: null as unknown as string
+                            },
                     tracks: [],
                     id: spotifyPlaylist.id,
                     url: spotifyPlaylist.id ? `https://open.spotify.com/track/${spotifyPlaylist.id}` : query,
@@ -405,7 +440,7 @@ class Player extends EventEmitter<PlayerEvents> {
                             description: m.subtitle ? `${m.title} - ${m.subtitle}` : "",
                             author: m.subtitle ?? "Unknown Artist",
                             url: m.uid ? `https://open.spotify.com/track/${m.uid}` : query,
-                            thumbnail: spotifyPlaylist.coverArt?.sources?.[0]?.url || "https://www.scdn.co/i/_global/twitter_card-default.jpg",
+                            thumbnail: spotifyPlaylist.visualIdentity?.image?.[0]?.url || "https://www.scdn.co/i/_global/twitter_card-default.jpg",
                             duration: Util.buildTimeCode(Util.parseMS(m.duration ?? 0)),
                             views: 0,
                             requestedBy: options.requestedBy as User,
@@ -423,7 +458,7 @@ class Player extends EventEmitter<PlayerEvents> {
                             description: m.subtitle ? `${m.title} - ${m.subtitle}` : "",
                             author: m.subtitle ?? "Unknown Artist",
                             url: m.uid ? `https://open.spotify.com/track/${m.uid}` : query,
-                            thumbnail: spotifyPlaylist.coverArt?.sources?.[0]?.url || "https://www.scdn.co/i/_global/twitter_card-default.jpg",
+                            thumbnail: spotifyPlaylist.visualIdentity?.image?.[0]?.url || "https://www.scdn.co/i/_global/twitter_card-default.jpg",
                             duration: Util.buildTimeCode(Util.parseMS(m.duration ?? 0)),
                             views: 0,
                             requestedBy: options.requestedBy as User,
@@ -438,44 +473,51 @@ class Player extends EventEmitter<PlayerEvents> {
                 return { playlist: playlist, tracks: playlist.tracks };
             }
             case QueryType.SOUNDCLOUD_PLAYLIST: {
-                const data = await soundcloud.getPlaylist(query).catch(Util.noop);
+                const data: any = await sc.playlists.get(query).catch(Util.noop);
                 if (!data) return { playlist: null, tracks: [] };
 
-                const res = new Playlist(this, {
-                    title: data.title,
-                    description: data.description ?? "",
-                    thumbnail: data.thumbnail ?? "https://soundcloud.com/pwa-icon-192.png",
+                const playlist = new Playlist(this, {
+                    title: data.title || "Untitled Playlist",
+                    description: data.description || "",
+                    thumbnail: (data.artwork_url || data.artworkUrl || data?.user?.avatar_url || "https://soundcloud.com/pwa-icon-192.png")
+                        .replace?.("-large", "-t500x500") || "https://soundcloud.com/pwa-icon-192.png",
                     type: "playlist",
                     source: "soundcloud",
                     author: {
-                        name: data.author?.name ?? data.author?.username ?? "Unknown Artist",
-                        url: data.author?.profile
+                        name: data.user?.username || data.user?.name || "Unknown Artist",
+                        url: data.user?.permalink_url || data.user?.permalinkUrl || null as unknown as string
                     },
                     tracks: [],
-                    id: `${data.id}`, // stringified
-                    url: data.url,
+                    id: String(data.id ?? ""),
+                    url: data.permalink_url || data.permalinkUrl || data.url,
                     rawPlaylist: data
                 });
 
-                for (const song of data.tracks) {
-                    const track = new Track(this, {
-                        title: song.title,
-                        description: song.description ?? "",
-                        author: song.author?.username ?? song.author?.name ?? "Unknown Artist",
-                        url: song.url,
-                        thumbnail: song.thumbnail,
-                        duration: Util.buildTimeCode(Util.parseMS(song.duration)),
-                        views: song.playCount ?? 0,
-                        requestedBy: options.requestedBy,
-                        playlist: res,
+                const items: any[] = Array.isArray(data.tracks) ? data.tracks : [];
+                for (const song of items) {
+                    const tr = new Track(this, {
+                        title: song?.title || "Unknown Title",
+                        description: song?.description || "",
+                        author: song?.user?.username || song?.user?.name || "Unknown Artist",
+                        url: song?.permalink_url || song?.permalinkUrl || song?.url,
+                        thumbnail: (song?.artwork_url || song?.artworkUrl || song?.user?.avatar_url || "https://soundcloud.com/pwa-icon-192.png")
+                            .replace?.("-large", "-t500x500") || "https://soundcloud.com/pwa-icon-192.png",
+                        duration: Util.buildTimeCode(Util.parseMS(song?.duration || 0)),
+                        views: song?.playback_count ?? song?.playCount ?? 0,
+                        requestedBy: options.requestedBy as User,
+                        playlist,
                         source: "soundcloud",
-                        engine: song
+                        engine: sc.util.streamTrack(song.permalink_url)
                     });
-                    res.tracks.push(track);
+
+                    playlist.tracks.push(tr);
+
+                    await sleep(150);
                 }
 
-                return { playlist: res, tracks: res.tracks };
+                return { playlist, tracks: playlist.tracks };
             }
+
             case QueryType.YOUTUBE_PLAYLIST: {
                 const ytpl = await YouTube.getPlaylist(query).catch(Util.noop);
                 if (!ytpl) return { playlist: null, tracks: [] };

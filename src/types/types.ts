@@ -4,10 +4,14 @@ import { Queue } from "../Structures/Queue";
 import Track from "../Structures/Track";
 import { Playlist } from "../Structures/Playlist";
 import { StreamDispatcher } from "../VoiceInterface/StreamDispatcher";
-import { downloadOptions } from "@bleah/ytdl-core";
 
 export type FiltersName = keyof QueueFilters;
 
+/**
+ * Result shape returned by a player search.
+ * - `playlist` will be filled when the query resolves to a playlist (else `null`)
+ * - `tracks` contains one or more resolved tracks
+ */
 export interface PlayerSearchResult {
     playlist: Playlist | null;
     tracks: Track[];
@@ -15,6 +19,8 @@ export interface PlayerSearchResult {
 
 /**
  * @typedef {AudioFilters} QueueFilters
+ * A set of boolean toggles for each supported audio filter. When `true`, the
+ * corresponding filter is applied by FFmpeg (via `encoderArgs`).
  */
 export interface QueueFilters {
     bassboost_low?: boolean;
@@ -65,42 +71,40 @@ export type TrackSource = "soundcloud" | "youtube" | "spotify" | "attachment" | 
 
 /**
  * @typedef {object} RawTrackData
- * @property {string} title The title
- * @property {string} description The description
- * @property {string} author The author
- * @property {string} url The url
- * @property {string} thumbnail The thumbnail
- * @property {string} duration The duration
- * @property {number} views The views
- * @property {User} requestedBy The user who requested this track
- * @property {Playlist} [playlist] The playlist
- * @property {TrackSource} [source="arbitrary"] The source
- * @property {any} [engine] The engine
- * @property {boolean} [live] If this track is live
- * @property {any} [raw] The raw data
+ * Raw metadata used to create a `Track` instance.
  */
 export interface RawTrackData {
+    /** The title shown to users */
     title: string;
+    /** A short description or snippet for the track */
     description: string;
+    /** Channel/artist/uploader name */
     author: string;
+    /** Canonical URL of the track */
     url: string;
+    /** Thumbnail URL (if any) */
     thumbnail: string;
+    /** Formatted duration string (e.g., "3:45") */
     duration: string;
+    /** View count (if known) */
     views: number;
+    /** Who requested the track */
     requestedBy: User;
+    /** Parent playlist, if created from one */
     playlist?: Playlist;
+    /** Origin service */
     source?: TrackSource;
+    /** Engine/handle needed by custom extractors (e.g., a function or stream) */
     engine?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+    /** Whether the source is live */
     live?: boolean;
+    /** Raw extractor payload for advanced consumers */
     raw?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
 /**
  * @typedef {object} TimeData
- * @property {number} days Time in days
- * @property {number} hours Time in hours
- * @property {number} minutes Time in minutes
- * @property {number} seconds Time in seconds
+ * Structured time (days/hours/minutes/seconds).
  */
 export interface TimeData {
     days: number;
@@ -110,113 +114,146 @@ export interface TimeData {
 }
 
 /**
+ * Network/auth options that are passed down to the yt-dlp bridge and (for arbitrary URL inputs)
+ * translated to FFmpeg headers/flags when possible.
+ */
+export interface YTDLPAgent {
+    /** Proxy URL, e.g. http://user:pass@host:port or socks5://host:port */
+    proxyUri?: string;
+    /** Ask yt-dlp to read cookies from a browser profile */
+    cookiesFromBrowser?: "chrome" | "brave" | "firefox" | "edge";
+    /** Absolute path to cookies.txt (Netscape format) consumed by yt-dlp */
+    cookiesFile?: string;
+    /** Absolute path to cookies.json (array); auto-converted to Netscape cookies.txt for yt-dlp */
+    cookiesJsonPath?: string;
+    /** Explicit "Cookie: ..." header string (takes precedence over `cookies`) */
+    cookiesHeader?: string;
+    /** Cookies as raw header string, object map, or array of {name,value} */
+    cookies?: any;
+    /** If true, do not set a browser-like default User-Agent */
+    noUA?: boolean;
+    /** Prefer IPv4 in yt-dlp; note FFmpeg has no perfect equivalent for arbitrary URLs */
+    forceIPv4?: boolean;
+    /** Auto-detect and use cookies from the local browser profile. */
+    autoCookiesFromBrowser?: boolean;
+}
+
+/**
  * @typedef {object} PlayerProgressbarOptions
- * @property {boolean} [timecodes] If it should render time codes
- * @property {boolean} [queue] If it should create progress bar for the whole queue
- * @property {number} [length] The bar length
- * @property {string} [line] The bar track
- * @property {string} [indicator] The indicator
+ * Options for rendering the textual progress bar.
  */
 export interface PlayerProgressbarOptions {
+    /** Include current/end timecodes (e.g., "1:23 ┃ ▬🔘▬▬ ... ┃ 3:45") */
     timecodes?: boolean;
+    /** Total length (characters) of the bar, excluding timecodes */
     length?: number;
+    /** Glyph used for the bar fill */
     line?: string;
+    /** Glyph used as the current position indicator */
     indicator?: string;
 }
 
 /**
  * @typedef {object} PlayerOptions
- * @property {boolean} [leaveOnEnd=true] If it should leave on end
- * @property {boolean} [leaveOnStop=true] If it should leave on stop
- * @property {boolean} [leaveOnEmpty=true] If it should leave on empty
- * @property {number} [leaveOnEmptyCooldown=1000] The cooldown in ms
- * @property {boolean} [autoSelfDeaf=true] If it should set the bot in deaf mode
- * @property {YTDLDownloadOptions} [ytdlOptions={}] The youtube download options
- * @property {YTDLAgent} [ytdlAgent={}] The youtube agent
- * @property {number} [initialVolume=100] The initial player volume
- * @property {number} [bufferingTimeout=3000] Buffering timeout for the stream
- * @property {boolean} [spotifyBridge=true] If player should bridge spotify source to youtube
- * @property {boolean} [disableVolume=false] If player should disable inline volume
- * @property {boolean} [volumeSmoothness=0] The volume transition smoothness between volume changes (lower the value to get better result)
- * Setting this or leaving this empty will disable this effect. Example: `volumeSmoothness: 0.1`
- * @property {Function} [onBeforeCreateStream] Runs before creating stream
+ * Global options that control queue/player behavior and stream creation.
  */
 export interface PlayerOptions {
+    /** Leave voice channel automatically when the queue ends */
     leaveOnEnd?: boolean;
+    /** Cooldown (ms) before leaving on end (lets you enqueue quickly) */
     leaveOnEndCooldown?: number;
+    /** Leave voice channel when `stop()` is called */
     leaveOnStop?: boolean;
+    /** Leave when the voice channel becomes empty */
     leaveOnEmpty?: boolean;
+    /** Cooldown (ms) before leaving on empty */
     leaveOnEmptyCooldown?: number;
+    /** Self-deafen the bot to avoid audio loopback */
     autoSelfDeaf?: boolean;
-    ytdlOptions?: downloadOptions;
-    ytdlAgent?: {
-        type: "proxy" | "cookie";
-        proxyUri: string;
-        cookies: any;
-    }
+
+    /**
+     * Network/auth hints for yt-dlp bridge:
+     * - proxy/cookies/cookiesFromBrowser/forceIPv4/User-Agent, etc.
+     */
+    ytdlpAgent?: YTDLPAgent;
+
+    /** Initial playback volume (0–100) */
     initialVolume?: number;
+    /** Delay (ms) before starting playback to allow buffering */
     bufferingTimeout?: number;
+    /**
+     * If `true`, tries to resolve Spotify tracks to YouTube equivalents
+     * when the extractor doesn't provide a direct stream.
+     */
     spotifyBridge?: boolean;
+    /** If `true`, disables inline software volume control */
     disableVolume?: boolean;
+    /**
+     * Smooth volume transitions (0..1 recommended small values).
+     * Leave undefined/0 to disable smoothing.
+     */
     volumeSmoothness?: number;
+
+    /**
+     * Hook called before a stream is created.
+     * Return a custom Readable to override default stream creation.
+     */
     onBeforeCreateStream?: (track: Track, source: TrackSource, queue: Queue) => Promise<Readable>;
 }
 
 /**
  * @typedef {object} ExtractorModelData
- * @property {object} [playlist] The playlist info (if any)
- * @property {string} [playlist.title] The playlist title
- * @property {string} [playlist.description] The playlist description
- * @property {string} [playlist.thumbnail] The playlist thumbnail
- * @property {album|playlist} [playlist.type] The playlist type: `album` | `playlist`
- * @property {TrackSource} [playlist.source] The playlist source
- * @property {object} [playlist.author] The playlist author
- * @property {string} [playlist.author.name] The author name
- * @property {string} [playlist.author.url] The author url
- * @property {string} [playlist.id] The playlist id
- * @property {string} [playlist.url] The playlist url
- * @property {any} [playlist.rawPlaylist] The raw data
- * @property {ExtractorData[]} data The data
+ * Normalized data returned by custom extractors (tracks + optional playlist info).
  */
 
 /**
  * @typedef {object} ExtractorData
- * @property {string} title The title
- * @property {number} duration The duration
- * @property {string} thumbnail The thumbnail
- * @property {string|Readable|Duplex} engine The stream engine
- * @property {number} views The views count
- * @property {string} author The author
- * @property {string} description The description
- * @property {string} url The url
- * @property {string} [version] The extractor version
- * @property {TrackSource} [source="arbitrary"] The source
+ * Individual entry in a custom extractor response.
  */
 export interface ExtractorModelData {
     playlist?: {
+        /** Playlist title */
         title: string;
+        /** Playlist description (if present) */
         description: string;
+        /** Playlist thumbnail URL */
         thumbnail: string;
+        /** 'album' or 'playlist' */
         type: "album" | "playlist";
+        /** Source platform */
         source: TrackSource;
+        /** Playlist author/channel */
         author: {
             name: string;
             url: string;
         };
+        /** Playlist identifier */
         id: string;
+        /** Canonical playlist URL */
         url: string;
+        /** Raw extractor payload (optional) */
         rawPlaylist?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
     };
     data: {
+        /** Track title */
         title: string;
+        /** Duration in seconds */
         duration: number;
+        /** Thumbnail URL */
         thumbnail: string;
+        /** Stream engine (URL, Readable, or Duplex) */
         engine: string | Readable | Duplex;
+        /** View count */
         views: number;
+        /** Uploader/artist/author name */
         author: string;
+        /** Description/snippet */
         description: string;
+        /** Canonical URL */
         url: string;
+        /** Optional extractor version */
         version?: string;
+        /** Source platform */
         source?: TrackSource;
     }[];
 }
@@ -346,32 +383,36 @@ export interface PlayerEvents {
     trackStart: (queue: Queue, track: Track) => any;
     trackEnd: (queue: Queue, track: Track) => any;
 }
-
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 /**
  * @typedef {object} PlayOptions
- * @property {boolean} [filtersUpdate=false] If this play was triggered for filters update
- * @property {string[]} [encoderArgs=[]] FFmpeg args passed to encoder
- * @property {number} [seek] Time to seek to before playing
- * @property {boolean} [immediate=false] If it should start playing the provided track immediately
+ * Options applied when starting playback for a specific track.
  */
 export interface PlayOptions {
+    /** `true` if this play call was triggered by a filter update (suppresses some events) */
     filtersUpdate?: boolean;
+    /** Additional FFmpeg args (e.g., filters) merged into the encoder pipeline */
     encoderArgs?: string[];
+    /** Seek position in milliseconds before starting playback */
     seek?: number;
+    /** If `true`, start playing this track immediately, bypassing the queue */
     immediate?: boolean;
 }
 
 /**
  * @typedef {object} SearchOptions
- * @property {UserResolvable} requestedBy The user who requested this search
- * @property {QueryType|string} [searchEngine=QueryType.AUTO] The query search engine, can be extractor name to target specific one (custom)
- * @property {boolean} [blockExtractor=false] If it should block custom extractors
+ * How to perform a search and who requested it.
  */
 export interface SearchOptions {
+    /** Who requested the search (User, Snowflake or resolvable) */
     requestedBy: UserResolvable;
+    /**
+     * Search engine to use.
+     * Can be a `QueryType` enum value or a custom extractor name.
+     */
     searchEngine?: QueryType | string;
+    /** If `true`, ignore any registered custom extractors */
     blockExtractor?: boolean;
 }
 
@@ -392,47 +433,37 @@ export enum QueueRepeatMode {
 
 /**
  * @typedef {object} PlaylistInitData
- * @property {Track[]} tracks The tracks of this playlist
- * @property {string} title The playlist title
- * @property {string} description The description
- * @property {string} thumbnail The thumbnail
- * @property {album|playlist} type The playlist type: `album` | `playlist`
- * @property {TrackSource} source The playlist source
- * @property {object} author The playlist author
- * @property {string} [author.name] The author name
- * @property {string} [author.url] The author url
- * @property {string} id The playlist id
- * @property {string} url The playlist url
- * @property {any} [rawPlaylist] The raw playlist data
+ * Shape used to create a `Playlist` instance.
  */
 export interface PlaylistInitData {
+    /** All tracks in the playlist (in initial order) */
     tracks: Track[];
+    /** Playlist title */
     title: string;
+    /** Playlist description/snippet */
     description: string;
+    /** Playlist thumbnail URL */
     thumbnail: string;
+    /** 'album' or 'playlist' */
     type: "album" | "playlist";
+    /** Source platform */
     source: TrackSource;
+    /** Playlist author/channel */
     author: {
         name: string;
         url: string;
     };
+    /** Unique ID provided by the source platform */
     id: string;
+    /** Canonical URL for the playlist */
     url: string;
+    /** Raw payload returned by the extractor (optional) */
     rawPlaylist?: any; // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
 /**
  * @typedef {object} TrackJSON
- * @property {string} title The track title
- * @property {string} description The track description
- * @property {string} author The author
- * @property {string} url The url
- * @property {string} thumbnail The thumbnail
- * @property {string} duration The duration
- * @property {number} durationMS The duration in ms
- * @property {number} views The views count
- * @property {Snowflake} requestedBy The id of the user who requested this track
- * @property {PlaylistJSON} [playlist] The playlist info (if any)
+ * JSON-safe representation of a `Track` used for logging/serialization.
  */
 export interface TrackJSON {
     id: Snowflake;
@@ -442,25 +473,18 @@ export interface TrackJSON {
     url: string;
     thumbnail: string;
     duration: string;
+    /** Total duration in milliseconds */
     durationMS: number;
     views: number;
+    /** ID of the user who requested the track */
     requestedBy: Snowflake;
+    /** Parent playlist (if any), also in JSON-safe form */
     playlist?: PlaylistJSON;
 }
 
 /**
  * @typedef {object} PlaylistJSON
- * @property {string} id The playlist id
- * @property {string} url The playlist url
- * @property {string} title The playlist title
- * @property {string} description The playlist description
- * @property {string} thumbnail The thumbnail
- * @property {album|playlist} type The playlist type: `album` | `playlist`
- * @property {TrackSource} source The track source
- * @property {object} author The playlist author
- * @property {string} [author.name] The author name
- * @property {string} [author.url] The author url
- * @property {TrackJSON[]} tracks The tracks data (if any)
+ * JSON-safe representation of a `Playlist`, including its tracks.
  */
 export interface PlaylistJSON {
     id: string;
@@ -468,27 +492,29 @@ export interface PlaylistJSON {
     title: string;
     description: string;
     thumbnail: string;
+    /** 'album' or 'playlist' */
     type: "album" | "playlist";
+    /** Source platform */
     source: TrackSource;
+    /** Author/channel info */
     author: {
         name: string;
         url: string;
     };
+    /** List of track JSON entries */
     tracks: TrackJSON[];
 }
 
 /**
  * @typedef {object} PlayerInitOptions
- * @property {YTDLDownloadOptions} [ytdlOptions={}] The options passed to `@bleah/ytdl-core`
- * @property {YTDLAgent} [ytdlAgent={}] The youtube agent
- * @property {number} [connectionTimeout=20000] The voice connection timeout
+ * Initialization options for the Player constructor (top-level).
  */
 export interface PlayerInitOptions {
-    ytdlOptions?: downloadOptions;
-    ytdlAgent?: {
-        type: "proxy" | "cookie";
-        proxyUri: string;
-        cookies: any;
-    }
+    /**
+     * Global network/auth hints used by the yt-dlp bridge:
+     * - proxy/cookies/cookiesFromBrowser/forceIPv4/User-Agent, etc.
+     */
+    ytdlpAgent?: YTDLPAgent;
+    /** Voice connection timeout in ms (when joining a channel) */
     connectionTimeout?: number;
 }
