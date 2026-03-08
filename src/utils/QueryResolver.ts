@@ -1,5 +1,4 @@
-import { validateID, validateURL } from "../utils/youtubeValidators";
-import { YouTube } from "youtube-sr";
+import { validateID, validateURL, validateVideoURL, validateClipURL, validatePlaylist } from "../utils/youtubeValidators";
 import { QueryType } from "../types/types";
 
 // SoundCloud (regex simple)
@@ -23,8 +22,8 @@ class QueryResolver {
     if (SC_TRACK_RE.test(query)) return QueryType.SOUNDCLOUD_TRACK;
 
     // YouTube
-    if (YouTube.isPlaylist(query)) return QueryType.YOUTUBE_PLAYLIST;
-    if (validateID(query) || validateURL(query)) return QueryType.YOUTUBE_VIDEO;
+    if (validatePlaylist(query)) return QueryType.YOUTUBE_PLAYLIST;
+    if (validateID(query) || validateVideoURL(query) || validateClipURL(query)) return QueryType.YOUTUBE_VIDEO;
 
     // Spotify
     if (SP_SONG_RE.test(query)) return QueryType.SPOTIFY_SONG;

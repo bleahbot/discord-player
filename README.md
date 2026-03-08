@@ -18,6 +18,11 @@ $ npm install --save @bleah/discord-player
 $ npm install --save @discordjs/opus
 ```
 
+- or `opusscript`
+```sh
+$ npm install --save opusscript
+```
+
 ### Install FFmpeg
 - FFMPEG Binary: **[https://www.ffmpeg.org/download.html](https://www.ffmpeg.org/download.html)**
 - FFMPEG Node Module: **[https://npmjs.com/package/ffmpeg-static](https://npmjs.com/package/ffmpeg-static)**

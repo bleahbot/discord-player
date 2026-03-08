@@ -6,7 +6,7 @@ import { PlayerOptions, PlayerProgressbarOptions, PlayOptions, QueueFilters, Que
 import ytdlp from "../utils/YTDLP";
 import { AudioResource, StreamType } from "@discordjs/voice";
 import { Util } from "../utils/Util";
-import YouTube from "youtube-sr";
+import { ytjsSearchVideos, ytjsGetAutoplayVideo } from "../utils/YouTubeJS";
 import AudioFilters from "../utils/AudioFilters";
 import { PlayerError, ErrorStatusCode } from "./PlayerError";
 import type { Readable } from "stream";
@@ -701,9 +701,8 @@ class Queue<T = unknown> {
             let spotifyResolved = false;
 
             if (this.options.spotifyBridge && track.raw.source === "spotify" && !track.raw.engine) {
-                track.raw.engine = await YouTube.search(`${track.author} ${track.title}`, { type: "video" })
-                    .then((x) => x[0]?.url)
-                    .catch(() => null);
+                const results = await ytjsSearchVideos(`${track.author} ${track.title}`).catch(() => []);
+                track.raw.engine = results[0]?.url || null;
                 spotifyResolved = true;
             }
 
@@ -798,23 +797,24 @@ class Queue<T = unknown> {
         if (!track || ![track.source, track.raw?.source].includes("youtube")) {
             return this.emitEnd();
         }
-        const info = await YouTube.getVideo(track.url)
-            .then((x) => x.videos[0])
-            .catch(Util.noop);
+        const info = await ytjsGetAutoplayVideo(track.url).catch(Util.noop);
         if (!info) {
             return this.emitEnd();
         }
 
         const nextTrack = new Track(this.player, {
-            title: info.title,
-            url: `https://www.youtube.com/watch?v=${info.id}`,
-            duration: info.durationFormatted ? Util.buildTimeCode(Util.parseMS(info.duration * 1000)) : "0:00",
+            title: info.title || "Unknown Title",
+            url: info.url || `https://www.youtube.com/watch?v=${info.id}`,
+            duration: info.durationFormatted || "0:00",
             description: "",
-            thumbnail: typeof info.thumbnail === "string" ? info.thumbnail : info.thumbnail.url,
-            views: info.views,
-            author: info.channel.name,
+            thumbnail: info.thumbnail || "",
+            views: Number(info.views || 0),
+            author: info.author || "Unknown",
             requestedBy: track.requestedBy,
-            source: "youtube"
+            source: "youtube",
+            raw: {
+                source: "youtube"
+            }
         });
 
         this.play(nextTrack, { immediate: true });

@@ -42,6 +42,38 @@ export function validateURL(url: string): boolean {
 }
 
 /* ============================================================================
+ * Playlist URL validators (coarse checks)
+ * ==========================================================================*/
+export function validatePlaylist(query: string): boolean {
+  const value = String(query).trim();
+
+  // direct playlist IDs
+  if (/^(PL|UU|LL|RD|OLAK5uy_)[A-Za-z0-9_-]+$/.test(value)) return true;
+
+  // obvious URL cases
+  if (/[?&]list=([A-Za-z0-9_-]+)/i.test(value)) return true;
+  if (/\/playlist\?/i.test(value)) return true;
+
+  try {
+    const url = new URL(value);
+    const host = url.hostname.replace(/^www\./, "").toLowerCase();
+
+    const isYouTubeHost =
+      host === "youtube.com" ||
+      host.endsWith(".youtube.com") ||
+      host === "youtube-nocookie.com" ||
+      host.endsWith(".youtube-nocookie.com") ||
+      host === "youtu.be";
+
+    if (!isYouTubeHost) return false;
+
+    return !!url.searchParams.get("list");
+  } catch {
+    return false;
+  }
+}
+
+/* ============================================================================
  * Specific YouTube URL validators (stricter)
  * ==========================================================================*/
 

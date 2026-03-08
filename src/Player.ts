@@ -6,20 +6,20 @@ import { PlayerEvents, PlayerOptions, QueryType, SearchOptions, PlayerInitOption
 import Track from "./Structures/Track";
 import { QueryResolver } from "./utils/QueryResolver";
 import { getInfoAttachment } from "./internal/Attachment";
-import YouTube from "youtube-sr";
+import { ytjsGetVideo, ytjsSearchVideos, ytjsGetPlaylist } from "./utils/YouTubeJS";
 import { Util } from "./utils/Util";
 import fetch from 'isomorphic-unfetch';
 import { PlayerError, ErrorStatusCode } from "./Structures/PlayerError";
-import { getInfo as ytdlpGetInfo } from "./utils/YTDLP";
+import { getInfo as ytdlpGetInfo, getPlaylistInfo as ytdlpGetPlaylistInfo } from "./utils/YTDLP";
 import { Playlist } from "./Structures/Playlist";
 import { ExtractorModel } from "./Structures/ExtractorModel";
 import { generateDependencyReport } from "@discordjs/voice";
 // @ts-ignore
 import spotifyUrlInfo from 'spotify-url-info';
 
-const Spotify = spotifyUrlInfo(fetch);
-
 import type Soundcloud from "soundcloud.ts";
+
+const Spotify = spotifyUrlInfo(fetch);
 
 type SoundCloudCtor = new (clientId?: string, oauth?: string) => Soundcloud;
 
@@ -280,6 +280,33 @@ class Player extends EventEmitter<PlayerEvents> {
         const qt = options.searchEngine === QueryType.AUTO ? QueryResolver.resolve(query) : options.searchEngine;
         switch (qt) {
             case QueryType.YOUTUBE_VIDEO: {
+                try {
+                    const video: any = await ytjsGetVideo(query).catch(Util.noop);
+
+                    if (video) {
+                        const thumbnail =
+                            video.thumbnail?.displayThumbnailURL?.("maxresdefault") ||
+                            video.thumbnail?.url ||
+                            (Array.isArray(video.thumbnails) ? video.thumbnails.slice(-1)[0]?.url : "") ||
+                            (video.id ? `https://i.ytimg.com/vi/${video.id}/hqdefault.jpg` : "");
+
+                        const track = new Track(this, {
+                            title: video.title || "Unknown Title",
+                            description: video.description || "",
+                            author: video.channel?.name || video.channel?.title || "Unknown",
+                            url: video.url || (video.id ? `https://www.youtube.com/watch?v=${video.id}` : query),
+                            requestedBy: options.requestedBy as User,
+                            thumbnail,
+                            views: Number(video.views || 0),
+                            duration: video.durationFormatted || "0:00",
+                            source: "youtube",
+                            raw: video
+                        });
+
+                        return { playlist: null, tracks: [track] };
+                    }
+                } catch {}
+
                 const agent = this.options.ytdlpAgent ? { ...(this.options.ytdlpAgent as any) } : null;
 
                 const info = await ytdlpGetInfo(query, {
@@ -295,8 +322,8 @@ class Player extends EventEmitter<PlayerEvents> {
                     url: info.videoDetails.video_url,
                     requestedBy: options.requestedBy as User,
                     thumbnail: (info.videoDetails.thumbnails?.length ? info.videoDetails.thumbnails.slice(-1)[0]?.url : undefined) || "",
-                    views: parseInt(info.videoDetails.viewCount.replace(/[^0-9]/g, "")) || 0,
-                    duration: Util.buildTimeCode(Util.parseMS(parseInt(info.videoDetails.lengthSeconds) * 1000)),
+                    views: parseInt(String(info.videoDetails.viewCount).replace(/[^0-9]/g, "")) || 0,
+                    duration: Util.buildTimeCode(Util.parseMS(parseInt(String(info.videoDetails.lengthSeconds)) * 1000)),
                     source: "youtube",
                     raw: info.raw
                 });
@@ -306,29 +333,41 @@ class Player extends EventEmitter<PlayerEvents> {
 
             case QueryType.YOUTUBE_SEARCH: {
                 let videos: any[] = [];
-                try {
-                videos = await YouTube.search(query, { type: "video" }) as any[];
-                } catch {}
 
-                if (videos && videos.length) {
-                    const tracks = videos.map((m: any) => new Track(this, {
-                        title: m.title,
-                        description: m.description || "",
-                        author: m.channel?.name || "Unknown",
-                        url: m.url,
-                        requestedBy: options.requestedBy as User,
-                        thumbnail: m.thumbnail?.displayThumbnailURL?.("maxresdefault"),
-                        views: m.views,
-                        duration: m.durationFormatted,
-                        source: "youtube",
-                        raw: m
-                    }));
+                try {
+                    videos = await ytjsSearchVideos(query) as any[];
+                } catch (err) {
+                    if ((this.options as any)?.debug) {
+                        console.warn("[Player] youtubei.js search failed, falling back to yt-dlp:", err);
+                    }
+                }
+
+                if (Array.isArray(videos) && videos.length) {
+                    const tracks = videos.map((m: any) => {
+                        const thumb =
+                            m.thumbnail?.displayThumbnailURL?.("maxresdefault") ||
+                            m.thumbnail?.url ||
+                            (Array.isArray(m.thumbnails) ? m.thumbnails.slice(-1)[0]?.url : "") ||
+                            (m.id ? `https://i.ytimg.com/vi/${m.id}/hqdefault.jpg` : "");
+
+                        return new Track(this, {
+                            title: m.title || "Unknown Title",
+                            description: m.description || "",
+                            author: m.channel?.name || m.channel?.title || "Unknown",
+                            url: m.url || (m.id ? `https://www.youtube.com/watch?v=${m.id}` : query),
+                            requestedBy: options.requestedBy as User,
+                            thumbnail: thumb,
+                            views: Number(m.views || 0),
+                            duration: m.durationFormatted || "0:00",
+                            source: "youtube",
+                            raw: m
+                        });
+                    });
 
                     return { playlist: null, tracks };
                 }
 
                 const agent = this.options.ytdlpAgent ? { ...(this.options.ytdlpAgent as any) } : null;
-
                 const q = `ytsearch15:"${String(query).trim()}"`;
 
                 const info = await ytdlpGetInfo(q, { agent }).catch(() => null);
@@ -336,21 +375,34 @@ class Player extends EventEmitter<PlayerEvents> {
 
                 if (!entries.length) return { playlist: null, tracks: [] };
 
-                const tracks = entries.map((r: any) => new Track(this, {
-                    title: r.title,
-                    description: r.description || "",
-                    author: r.channel || r.uploader_id || "Unknown",
-                    url: r.webpage_url ?? r.url,
-                    requestedBy: options.requestedBy as User,
-                    thumbnail: Array.isArray(r.thumbnails) ? r.thumbnails.slice(-1)[0]?.url : (r.thumbnail || ""),
-                    views: Number(r.view_count || 0),
-                    duration: Util.buildTimeCode(Util.parseMS((Number(r.duration || 0) * 1000) || 0)),
-                    source: "youtube",
-                    raw: r
-                }));
+                const tracks = entries.map((r: any) => {
+                    const videoUrl =
+                        r.webpage_url ||
+                        (typeof r.url === "string" && /^https?:\/\//.test(r.url) ? r.url : null) ||
+                        (r.id ? `https://www.youtube.com/watch?v=${r.id}` : query);
+
+                    const thumb =
+                        (Array.isArray(r.thumbnails) ? r.thumbnails.slice(-1)[0]?.url : null) ||
+                        r.thumbnail ||
+                        (r.id ? `https://i.ytimg.com/vi/${r.id}/hqdefault.jpg` : "");
+
+                    return new Track(this, {
+                        title: r.title || "Unknown Title",
+                        description: r.description || "",
+                        author: r.channel || r.uploader || r.uploader_id || "Unknown",
+                        url: videoUrl,
+                        requestedBy: options.requestedBy as User,
+                        thumbnail: thumb,
+                        views: Number(r.view_count || 0),
+                        duration: Util.buildTimeCode(Util.parseMS((Number(r.duration || 0) * 1000) || 0)),
+                        source: "youtube",
+                        raw: r
+                    });
+                });
 
                 return { playlist: null, tracks };
             }
+
             case QueryType.SOUNDCLOUD_TRACK:
             case QueryType.SOUNDCLOUD_SEARCH: {
                 let results: any[] = [];
@@ -405,6 +457,7 @@ class Player extends EventEmitter<PlayerEvents> {
 
                 return { playlist: null, tracks: [spotifyTrack] };
             }
+
             case QueryType.SPOTIFY_PLAYLIST:
             case QueryType.SPOTIFY_ALBUM: {
                 const spotifyPlaylist = await Spotify.getData(query).catch(Util.noop);
@@ -472,6 +525,7 @@ class Player extends EventEmitter<PlayerEvents> {
 
                 return { playlist: playlist, tracks: playlist.tracks };
             }
+
             case QueryType.SOUNDCLOUD_PLAYLIST: {
                 const data: any = await sc.playlists.get(query).catch(Util.noop);
                 if (!data) return { playlist: null, tracks: [] };
@@ -519,46 +573,107 @@ class Player extends EventEmitter<PlayerEvents> {
             }
 
             case QueryType.YOUTUBE_PLAYLIST: {
-                const ytpl = await YouTube.getPlaylist(query).catch(Util.noop);
-                if (!ytpl) return { playlist: null, tracks: [] };
+                const agent = this.options.ytdlpAgent ? { ...(this.options.ytdlpAgent as any) } : null;
 
-                await ytpl.fetch().catch(Util.noop);
+                try {
+                    const ytpl = await ytjsGetPlaylist(query).catch(Util.noop);
 
-                const playlist: Playlist = new Playlist(this, {
-                    title: ytpl.title,
-                    thumbnail: ytpl.thumbnail as unknown as string,
-                    description: "",
+                    if (ytpl) {
+                        if (Array.isArray(ytpl.videos) && ytpl.videos.length) {
+                            const playlist: Playlist = new Playlist(this, {
+                                title: ytpl.title,
+                                thumbnail: ytpl.thumbnail as unknown as string,
+                                description: "",
+                                type: "playlist",
+                                source: "youtube",
+                                author: {
+                                    name: ytpl.channel?.name || "Unknown",
+                                    url: ytpl.channel?.url || null as unknown as string
+                                },
+                                tracks: [],
+                                id: ytpl.id,
+                                url: ytpl.url,
+                                rawPlaylist: ytpl
+                            });
+
+                            playlist.tracks = ytpl.videos.map(
+                                (video) =>
+                                    new Track(this, {
+                                        title: video.title,
+                                        description: video.description || "",
+                                        author: video.channel?.name || "Unknown",
+                                        url: video.url,
+                                        requestedBy: options.requestedBy as User,
+                                        thumbnail: video.thumbnail?.url || "",
+                                        views: video.views || 0,
+                                        duration: video.durationFormatted || "0:00",
+                                        raw: video,
+                                        playlist,
+                                        source: "youtube"
+                                    })
+                            );
+
+                            return { playlist, tracks: playlist.tracks };
+                        }
+                    }
+                } catch {}
+
+                const info = await ytdlpGetPlaylistInfo(query, { agent }).catch(() => null);
+                const entries: any[] = info?.entries ?? [];
+
+                if (!entries.length) return { playlist: null, tracks: [] };
+
+                const playlist = new Playlist(this, {
+                    title: info?.raw?.title || "YouTube Playlist",
+                    thumbnail:
+                        info?.raw?.thumbnail ||
+                        (Array.isArray(info?.raw?.thumbnails) ? info.raw.thumbnails.slice(-1)[0]?.url : "") ||
+                        entries[0]?.thumbnail ||
+                        (entries[0]?.id ? `https://i.ytimg.com/vi/${entries[0].id}/hqdefault.jpg` : "") ||
+                        "",
+                    description: info?.raw?.description || "",
                     type: "playlist",
                     source: "youtube",
                     author: {
-                        name: ytpl.channel.name,
-                        url: ytpl.channel.url
+                        name: info?.raw?.channel || info?.raw?.uploader || info?.raw?.uploader_id || "Unknown",
+                        url: null as unknown as string
                     },
                     tracks: [],
-                    id: ytpl.id,
-                    url: ytpl.url,
-                    rawPlaylist: ytpl
+                    id: String(info?.raw?.id || ""),
+                    url: info?.raw?.webpage_url || query,
+                    rawPlaylist: info?.raw
                 });
 
-                playlist.tracks = ytpl.videos.map(
-                    (video) =>
-                        new Track(this, {
-                            title: video.title,
-                            description: video.description,
-                            author: video.channel?.name,
-                            url: video.url,
-                            requestedBy: options.requestedBy as User,
-                            thumbnail: video.thumbnail.url,
-                            views: video.views,
-                            duration: video.durationFormatted,
-                            raw: video,
-                            playlist: playlist,
-                            source: "youtube"
-                        })
-                );
+                playlist.tracks = entries.map((video: any) => {
+                    const videoUrl =
+                        video.webpage_url ||
+                        (typeof video.url === "string" && /^https?:\/\//.test(video.url)
+                            ? video.url
+                            : (video.id ? `https://www.youtube.com/watch?v=${video.id}` : query));
 
-                return { playlist: playlist, tracks: playlist.tracks };
+                    const thumb =
+                        (Array.isArray(video.thumbnails) ? video.thumbnails.slice(-1)[0]?.url : null) ||
+                        video.thumbnail ||
+                        (video.id ? `https://i.ytimg.com/vi/${video.id}/hqdefault.jpg` : "");
+
+                    return new Track(this, {
+                        title: video.title || "Unknown Title",
+                        description: video.description || "",
+                        author: video.channel || video.uploader || video.uploader_id || "Unknown",
+                        url: videoUrl,
+                        requestedBy: options.requestedBy as User,
+                        thumbnail: thumb,
+                        views: Number(video.view_count || 0),
+                        duration: Util.buildTimeCode(Util.parseMS((Number(video.duration || 0) * 1000) || 0)),
+                        raw: video,
+                        playlist,
+                        source: "youtube"
+                    });
+                });
+
+                return { playlist, tracks: playlist.tracks };
             }
+
             case QueryType.ATTACHMENT: {
                 const attachmentInfo = await getInfoAttachment(query);
                 if (!attachmentInfo) return { playlist: null, tracks: [] };
