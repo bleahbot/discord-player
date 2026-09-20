@@ -1,6 +1,6 @@
 {
   "name": "@bleah/discord-player",
-  "version": "6.9.6",
+  "version": "6.9.10",
   "description": "This is a fork of discord-player module",
   "main": "dist/index.js",
   "files": [
@@ -20,10 +20,11 @@
     "build": "rimraf dist && tsc && npm run build:esm",
     "build:check": "tsc --noEmit --incremental false",
     "build:esm": "gen-esm-wrapper ./dist/index.js ./dist/index.mjs",
-    "lint": "eslint src --ext .ts",
+    "lint": "eslint src tests --ext .ts,.js",
     "prepare": "husky install",
+    "test": "npm run build && node --test \"tests/*.test.js\"",
     "test-ytdlp": "npm run build && node test-ytdlp.js",
-    "lint:fix": "eslint src --ext .ts --fix"
+    "lint:fix": "eslint src tests --ext .ts,.js --fix"
   },
   "repository": {
     "type": "git",

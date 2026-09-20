@@ -707,7 +707,10 @@ class Queue<T = unknown> {
             }
 
             const link = track.raw.source === "spotify" ? track.raw.engine : track.url;
-            if (!link) return void this.play(this.tracks.shift(), { immediate: true });
+            if (!link) {
+                this.player.emit("error", this, new PlayerError(`Cannot play track "${track.title}": no playable URL was resolved.`, ErrorStatusCode.INVALID_TRACK));
+                return this.play(undefined, { immediate: true });
+            }
 
             if (customDownloader) {
                 const pre =

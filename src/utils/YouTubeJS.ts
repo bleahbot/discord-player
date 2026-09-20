@@ -1,5 +1,10 @@
 import { Util } from "./Util";
+import { validateID } from "./youtubeValidators";
+import type { YTNodes } from "youtubei.js";
 
+/* =========================================================
+ * YouTube.js client
+ * =======================================================*/
 type YoutubeiModule = typeof import("youtubei.js");
 type YT = Awaited<ReturnType<YoutubeiModule["Innertube"]["create"]>>;
 
@@ -9,6 +14,7 @@ let yt: YT | null = null;
 const YTJS_FILTER_KEY = "[YOUTUBEJS]";
 let youtubeJsConsolePatched = false;
 
+/** Loads youtubei.js on first use and shares the import promise. */
 async function loadYoutubei(): Promise<YoutubeiModule> {
     if (!ytModulePromise) {
         ytModulePromise = import("youtubei.js");
@@ -17,6 +23,7 @@ async function loadYoutubei(): Promise<YoutubeiModule> {
     return ytModulePromise;
 }
 
+/** Reuses the initialized InnerTube client with an in-memory cache. */
 export async function getYT() {
     if (yt) return yt;
 
@@ -30,6 +37,13 @@ export async function getYT() {
     return yt;
 }
 
+/* =========================================================
+ * Video/playlist IDs
+ * =======================================================*/
+/**
+ * Extracts a video ID from a watch or youtu.be URL.
+ * Raw IDs and unrecognized input are returned unchanged, apart from whitespace.
+ */
 export function extractVideoId(input: string): string {
     const s = String(input).trim();
 
@@ -49,6 +63,7 @@ export function extractVideoId(input: string): string {
     return s;
 }
 
+/** Reads the list parameter from a URL, or returns the trimmed input as a playlist ID. */
 export function extractPlaylistId(input: string): string {
     const s = String(input).trim();
 
@@ -61,6 +76,13 @@ export function extractPlaylistId(input: string): string {
     return s;
 }
 
+/* =========================================================
+ * Video metadata and search
+ * =======================================================*/
+/**
+ * Fetches video metadata in the shape used by Player.search.
+ * Returns null when the response has no title.
+ */
 export async function ytjsGetVideo(query: string) {
     const yt = await getYT();
     const videoId = extractVideoId(query);
@@ -132,6 +154,7 @@ export async function ytjsGetVideo(query: string) {
     };
 }
 
+/** Searches for videos and maps the results to the player's track fields. */
 export async function ytjsSearchVideos(query: string) {
     const yt = await getYT();
     const res: any = await yt.search(query, { type: "video" });
@@ -168,55 +191,97 @@ export async function ytjsSearchVideos(query: string) {
     });
 }
 
+/* =========================================================
+ * Playlist metadata
+ * =======================================================*/
+/**
+ * Loads one playlist page and maps its video entries to track metadata.
+ * Entries without valid video IDs or marked unplayable are left out.
+ */
 export async function ytjsGetPlaylist(query: string) {
     const yt = await getYT();
     const playlistId = extractPlaylistId(query);
 
     const playlist: any = await yt.getPlaylist(playlistId);
 
-    const videos: any[] =
-        Array.isArray(playlist?.videos) ? playlist.videos :
-        Array.isArray(playlist?.items) ? playlist.items :
-        [];
+    // items excludes recommended videos that can appear in the videos collection.
+    const videos: any[] = Array.isArray(playlist?.items) ? playlist.items : Array.isArray(playlist?.videos) ? playlist.videos : [];
 
-    const playlistThumbs = Array.isArray(playlist?.thumbnails) ? playlist.thumbnails : [];
+    const info = playlist?.info ?? playlist;
+    const playlistThumbs = Array.isArray(info?.thumbnails) ? info.thumbnails : [];
     const playlistThumb = playlistThumbs.length ? playlistThumbs[playlistThumbs.length - 1]?.url : "";
 
     return {
         id: playlist?.id || playlistId,
-        title: playlist?.title || "YouTube Playlist",
+        title: info?.title || "YouTube Playlist",
         url: playlist?.url || `https://www.youtube.com/playlist?list=${playlist?.id || playlistId}`,
         thumbnail: playlistThumb,
         channel: {
-            name: playlist?.author?.name || playlist?.author || playlist?.channel?.name || "Unknown",
-            url: playlist?.author?.url || playlist?.channel?.url || null
+            name: info?.author?.name || info?.author || info?.channel?.name || "Unknown",
+            url: info?.author?.url || info?.channel?.url || null
         },
-        videos: videos.map((video: any) => {
-            const thumbs = Array.isArray(video?.thumbnails) ? video.thumbnails : [];
-            const thumb = thumbs.length ? thumbs[thumbs.length - 1]?.url : "";
+        videos: videos
+            .map((video: any) => {
+                // LockupView uses content_id; Shorts expose the ID through a watch endpoint.
+                const id = [
+                    video?.id,
+                    video?.content_id,
+                    video?.endpoint?.payload?.videoId,
+                    video?.on_tap_endpoint?.payload?.videoId,
+                    video?.renderer_context?.command_context?.on_tap?.payload?.videoId
+                ].find((value) => typeof value === "string" && validateID(value));
+                if (!id || video?.is_playable === false) return null;
 
-            return {
-                id: video?.id || "",
-                title: video?.title?.text || video?.title || "Unknown Title",
-                description: video?.description?.text || video?.description || "",
-                url: video?.url || (video?.id ? `https://www.youtube.com/watch?v=${video.id}` : ""),
-                channel: {
-                    name: video?.author?.name || video?.author || video?.channel?.name || "Unknown"
-                },
-                thumbnail: { url: thumb },
-                views: Number(video?.view_count || video?.views || 0),
-                durationFormatted:
-                    video?.duration?.text ||
-                    video?.duration?.toString?.() ||
-                    video?.duration_text ||
-                    "0:00",
-                raw: video
-            };
-        }),
+                const thumbs = Array.isArray(video?.thumbnails)
+                    ? video.thumbnails
+                    : Array.isArray(video?.content_image?.image)
+                    ? video.content_image.image
+                    : Array.isArray(video?.thumbnail)
+                    ? video.thumbnail
+                    : [];
+                const thumb = thumbs.length ? thumbs[thumbs.length - 1]?.url : "";
+
+                // The channel link separates the artist from view counts and other metadata.
+                const metadataRows: YTNodes.ContentMetadataView["metadata_rows"] = video?.metadata?.metadata?.metadata_rows ?? [];
+                const metadataParts = metadataRows.flatMap((row) => row.metadata_parts ?? []);
+                const author = metadataParts.find((part) => part.text?.endpoint?.payload?.browseId?.startsWith("UC"))?.text?.text;
+
+                // LockupView carries the duration in a thumbnail badge.
+                const overlays: Array<{ badges?: YTNodes.ThumbnailBadgeView[] }> = video?.content_image?.overlays ?? [];
+                const badges = overlays.flatMap((overlay) => overlay.badges ?? []);
+                const durationBadge = badges.find((badge) => /^\d+(?::\d{2}){1,2}$/.test(badge.text ?? ""));
+
+                return {
+                    id,
+                    title: video?.title?.text || video?.title || video?.metadata?.title?.text || video?.overlay_metadata?.primary_text?.text || "Unknown Title",
+                    description: video?.description?.text || video?.description || "",
+                    url: `https://www.youtube.com/watch?v=${id}`,
+                    channel: {
+                        name: video?.author?.name || video?.author || video?.channel?.name || author || "Unknown"
+                    },
+                    thumbnail: { url: thumb },
+                    views: Number(video?.view_count || video?.views || 0),
+                    durationFormatted:
+                        video?.duration?.text ||
+                        video?.duration_text ||
+                        durationBadge?.text ||
+                        (typeof video?.duration?.seconds === "number" ? Util.buildTimeCode(Util.parseMS(video.duration.seconds * 1000)) : typeof video?.duration === "string" ? video.duration : "") ||
+                        "0:00",
+                    raw: video
+                };
+            })
+            .filter((video): video is NonNullable<typeof video> => video !== null),
         raw: playlist
     };
 }
 
+/* =========================================================
+ * Autoplay
+ * =======================================================*/
+/**
+ * Picks another video from the watch recommendations, falling back to search.
+ * Returns null when neither source provides a different video.
+ */
 export async function ytjsGetAutoplayVideo(urlOrId: string) {
     const yt = await getYT();
     const currentId = extractVideoId(urlOrId);
@@ -225,6 +290,7 @@ export async function ytjsGetAutoplayVideo(urlOrId: string) {
 
     let feed: any[] = Array.isArray(info?.watch_next_feed) ? info.watch_next_feed : [];
 
+    // Try the first continuation when the initial response has no recommendations.
     if (!feed.length && info?.wn_has_continuation && typeof info?.getWatchNextContinuation === "function") {
         let continued: any = null;
 
@@ -271,6 +337,7 @@ export async function ytjsGetAutoplayVideo(urlOrId: string) {
         };
     }
 
+    // Use the current artist and title when the watch feed has no other video.
     const fallbackQuery = `${info?.basic_info?.author || ""} ${info?.basic_info?.title || ""}`.trim();
     if (!fallbackQuery) return null;
 
@@ -287,6 +354,10 @@ export async function ytjsGetAutoplayVideo(urlOrId: string) {
     return next || null;
 }
 
+/* =========================================================
+ * YouTube.js console output
+ * =======================================================*/
+/** Checks all console arguments for the YouTube.js log prefix. */
 function shouldHideYoutubeJsLog(args: unknown[]): boolean {
     const text = args
         .map((arg) => {
@@ -303,6 +374,10 @@ function shouldHideYoutubeJsLog(args: unknown[]): boolean {
     return text.includes(YTJS_FILTER_KEY);
 }
 
+/**
+ * Installs the YouTube.js filter on the process-wide console methods once.
+ * Other messages go through the original handlers, including errors.
+ */
 function patchConsoleForYoutubeJs() {
     if (youtubeJsConsolePatched) return;
     youtubeJsConsolePatched = true;

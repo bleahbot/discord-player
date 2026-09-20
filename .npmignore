@@ -4,3 +4,4 @@ tsconfig.json
 .prettierrc
 output/
 test-ytdlp.js
+tests/
